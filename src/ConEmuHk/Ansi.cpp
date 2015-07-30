@@ -762,7 +762,7 @@ HANDLE WINAPI CEAnsi::OnCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, D
 	h = F(CreateFileW)(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
 	DWORD nLastErr = GetLastError();
 
-	DebugString(L"CEAnsi::OnCreateFileW executed");
+	DebugString(L"CEAnsi::OnCreateFileW executed\n");
 
 	// Just a check for "string" validity
 	if (lpFileName && (((DWORD_PTR)lpFileName) & ~0xFFFF)
@@ -776,7 +776,7 @@ HANDLE WINAPI CEAnsi::OnCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, D
 		{
 			ghLastConOut = h;
 		}
-		DebugString(L"CEAnsi::OnCreateFileW checked");
+		DebugString(L"CEAnsi::OnCreateFileW checked\n");
 	}
 
 	SetLastError(nLastErr);
