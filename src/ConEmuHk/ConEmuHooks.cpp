@@ -1104,6 +1104,9 @@ BOOL StartupHooks(HMODULE ahOurDll)
 	bool lbRc = SetAllHooks(ahOurDll, NULL, TRUE);
 	HLOGEND1();
 
+	extern FARPROC CallWriteConsoleW;
+	CallWriteConsoleW = (FARPROC)GetOriginalAddress(CEAnsi::OnWriteConsoleW, NULL);
+
 	print_timings(L"SetAllHooks - done");
 
 	//HLOGEND(); // StartupHooks - done

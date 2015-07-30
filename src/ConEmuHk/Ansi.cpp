@@ -106,6 +106,7 @@ bool CEAnsi::gbWasXTermOutput = false;
 
 /* ************ Export ANSI printings ************ */
 LONG gnWriteProcessed = 0;
+FARPROC CallWriteConsoleW = NULL;
 BOOL WINAPI WriteProcessed(LPCWSTR lpBuffer, DWORD nNumberOfCharsToWrite, LPDWORD lpNumberOfCharsWritten)
 {
 	HANDLE hConsoleOutput = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -943,6 +944,8 @@ BOOL CEAnsi::WriteText(OnWriteConsoleW_t _WriteConsoleW, HANDLE hConsoleOutput, 
 {
 	BOOL lbRc = FALSE;
 	DWORD /*nWritten = 0,*/ nTotalWritten = 0;
+
+	_ASSERTE(_WriteConsoleW != &WriteConsoleW && "It must point to CallPointer for 'unhooked' call");
 
 	ExtWriteTextParm write = {sizeof(write), ewtf_Current, hConsoleOutput};
 	write.Private = (void*)(FARPROC)_WriteConsoleW;
