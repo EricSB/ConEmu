@@ -1106,6 +1106,9 @@ BOOL StartupHooks(HMODULE ahOurDll)
 
 	extern FARPROC CallWriteConsoleW;
 	CallWriteConsoleW = (FARPROC)GetOriginalAddress(CEAnsi::OnWriteConsoleW, NULL);
+	#ifdef _DEBUG
+	gfVirtualAlloc = (VirtualAlloc_t)GetOriginalAddress(OnVirtualAlloc, NULL);
+	#endif
 
 	print_timings(L"SetAllHooks - done");
 
@@ -5911,7 +5914,7 @@ bool FindModuleByAddress(const BYTE* lpAddress, LPWSTR pszModule, int cchMax)
 #ifdef _DEBUG
 LPVOID WINAPI OnVirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect)
 {
-	typedef HANDLE(WINAPI* OnVirtualAlloc_t)(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
+	typedef LPVOID(WINAPI* OnVirtualAlloc_t)(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
 	ORIGINALFAST(VirtualAlloc);
 
 	LPVOID lpResult = F(VirtualAlloc)(lpAddress, dwSize, flAllocationType, flProtect);

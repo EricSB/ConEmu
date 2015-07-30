@@ -634,6 +634,18 @@ FARPROC WINAPI GetWriteConsoleW()
 	return (FARPROC)GetOriginalAddress(CEAnsi::OnWriteConsoleW, &ph);
 }
 
+FARPROC WINAPI GetVirtualAlloc()
+{
+	LPVOID fnVirtualAlloc = NULL;
+	#ifdef _DEBUG
+	extern LPVOID WINAPI OnVirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
+	fnVirtualAlloc = (FARPROC)GetOriginalAddress(OnVirtualAlloc, NULL);
+	#endif
+	if (!fnVirtualAlloc)
+		fnVirtualAlloc = &VirtualAlloc;
+	return (FARPROC)fnVirtualAlloc;
+}
+
 CInFuncCall::CInFuncCall()
 {
 	mpn_Counter = NULL;
@@ -1343,10 +1355,12 @@ bool __stdcall SetAllHooks(HMODULE ahOurDll, const wchar_t** aszExcludedModules 
 		if (gpHooks[i].HookedAddress && !gpHooks[i].CallAddress)
 		{
 			status = MH_CreateHook((FARPROC)gpHooks[i].HookedAddress, (FARPROC)gpHooks[i].NewAddress, &gpHooks[i].CallAddress);
+			_ASSERTE(status == MH_OK);
 		}
 	}
 
 	status = MH_EnableHook(MH_ALL_HOOKS);
+	_ASSERTE(status == MH_OK);
 
 	DebugString(L"SetAllHooks finished\n");
 
