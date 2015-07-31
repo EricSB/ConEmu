@@ -1105,11 +1105,11 @@ BOOL StartupHooks(HMODULE ahOurDll)
 	HLOGEND1();
 
 	extern FARPROC CallWriteConsoleW;
-	CallWriteConsoleW = (FARPROC)GetOriginalAddress(CEAnsi::OnWriteConsoleW, NULL);
+	CallWriteConsoleW = (FARPROC)GetOriginalAddress((LPVOID)CEAnsi::OnWriteConsoleW, NULL);
 	#ifdef _DEBUG
 	gfVirtualAlloc = (VirtualAlloc_t)GetOriginalAddress(OnVirtualAlloc, NULL);
 	#endif
-	gfGetRealConsoleWindow = (GetConsoleWindow_T)GetOriginalAddress(OnGetConsoleWindow, NULL);
+	gfGetRealConsoleWindow = (GetConsoleWindow_T)GetOriginalAddress((LPVOID)OnGetConsoleWindow, NULL);
 
 	print_timings(L"SetAllHooks - done");
 
