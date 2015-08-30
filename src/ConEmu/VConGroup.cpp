@@ -3124,6 +3124,10 @@ void CVConGroup::OnVConClosed(CVirtualConsole* apVCon)
 				bDbg4 = true;
 				setActiveVConAndFlags(NULL);
 			}
+			else
+			{
+				setActiveVConAndFlags(gp_VActive);
+			}
 
 			apVCon->DoDestroyDcWindow();
 			apVCon->Release();
@@ -3193,7 +3197,8 @@ void CVConGroup::OnUpdateProcessDisplay(HWND hInfo)
 				else
 					temp[0] = 0;
 
-				swprintf(temp+_tcslen(temp), _T("[%i.%i] %s - PID:%i"),
+				int iUsed = lstrlen(temp);
+				_wsprintf(temp+iUsed, SKIPLEN(MAX_PATH-iUsed) L"[%i.%i] %s - PID:%i",
 						 j+1, i, pPrc[i].Name, pPrc[i].ProcessID);
 				if (hInfo)
 					SendDlgItemMessage(hInfo, lbProcesses, LB_ADDSTRING, 0, (LPARAM)temp);
@@ -4296,6 +4301,23 @@ CVirtualConsole* CVConGroup::CreateCon(RConStartArgs *args, bool abAllowScripts 
 	{
 		gpConEmu->mp_Inside->mb_InsideIntegrationShift = false;
 		args->RunAsAdministrator = crb_On;
+	}
+
+	// Support starting new tasks by hotkey in the Active VCon working directory
+	// User have to add to Task parameters: /dir "%CD%"
+	if (args->pszStartupDir)
+	{
+		if (lstrcmpi(args->pszStartupDir, L"%CD%") == 0)
+		{
+			CEStr lsActiveDir;
+			CVConGuard vActive;
+			if ((GetActiveVCon(&vActive) >= 0) && (vActive->RCon()))
+				vActive->RCon()->GetConsoleCurDir(lsActiveDir);
+			if (lsActiveDir.IsEmpty())
+				lsActiveDir.Set(gpConEmu->WorkDir());
+			SafeFree(args->pszStartupDir);
+			args->pszStartupDir = lsActiveDir.Detach();
+		}
 	}
 
 	//wchar_t* pszScript = NULL; //, szScript[MAX_PATH];

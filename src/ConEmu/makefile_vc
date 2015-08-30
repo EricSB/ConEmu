@@ -23,7 +23,9 @@ GAWK=tools\gawk
 
 #DEF_FILE = ".\$(NAME).def"
 
-RES_FILE = "$(INTDIR)\$(NAME).res"
+RES_FILE = $(INTDIR)\$(NAME).res
+
+MINGW_RES_FILE = $(NAME)MinGW.res
 
 #PCH_FILE = "$(INTDIR)\headers.pch"
 
@@ -57,6 +59,7 @@ $(INTDIR)\FindPanel.obj \
 $(INTDIR)\FrameHolder.obj \
 $(INTDIR)\GestureEngine.obj \
 $(INTDIR)\GuiServer.obj \
+$(INTDIR)\HkFunc.obj \
 $(INTDIR)\HooksUnlocker.obj \
 $(INTDIR)\HotkeyChord.obj \
 $(INTDIR)\HotkeyDlg.obj \
@@ -123,7 +126,7 @@ $(INTDIR)\VConChild.obj \
 $(INTDIR)\VConGroup.obj \
 $(INTDIR)\VConRelease.obj \
 $(INTDIR)\VirtualConsole.obj \
-$(INTDIR)\WConsole.obj \
+$(INTDIR)\WConsoleInfo.obj \
 $(INTDIR)\WFiles.obj \
 $(INTDIR)\WObjects.obj \
 $(INTDIR)\WRegistry.obj \
@@ -154,8 +157,7 @@ LINKFLAGS=/nologo /subsystem:WINDOWS /out:"$(OUTDIR)\$(OUTNAME).exe" /map:"$(MAP
 LINKFLAGS=$(LINKFLAGS) /DEBUG /pdb:"$(PDB)"
 !endif
 ULINKFLAGS=-q -m- -ap -Gz -O- -o- -Gh -Gh-
-#__GNUC__ чтобы манифест включился
-RFLAGS=$(RCWIN64) /D__GNUC__ /l 0x409 /fo"$(RES_FILE)" /d $(USEDEBUG)
+RFLAGS=$(RCWIN64) /DCERC_MANIFEST /l 0x409 /d $(USEDEBUG)
 
 # config-cpecific
 !ifdef DEBUG
@@ -171,7 +173,7 @@ LINKFLAGS=$(LINKFLAGS)
 LINKFLAGS=$(LINKFLAGS) /incremental:no /OPT:REF /OPT:ICF
 !endif
 
-# platform-cpecific
+# platform-specific
 !ifdef X86
 #Struct member alignment must be 8bytes even on x86 (Win7 API)
 CPPFLAGS=$(CPPFLAGS) /Zp8
@@ -185,29 +187,23 @@ CPPFLAGS=$(CPPFLAGS) /Zp8 /D_WIN64 /DWIN64
 LINKFLAGS=$(LINKFLAGS) /machine:IA64
 !endif
 
-# compiler-cpecific
-!if "$(VC)"=="8"
-CPPFLAGS=$(CPPFLAGS) /Wp64
-LINKFLAGS=$(LINKFLAGS) /opt:nowin98
+# Due to a bug(?) in MinGW windres
+# we have to prepare some resources
+!ifdef X86
+MINGWRES=$(MINGW_RES_FILE)
 !else
-RFLAGS=$(RFLAGS) 
+MINGWRES=
 !endif
 
 ALL: AllDirs build clean
-#ALL: AllDirs lng depfile
-#	$(MAKE) /nologo /f makefile_vc build USEDEPS=1
 
-#.PHONY: lng
-#lng: farlang.templ
-#	echo generating language files
-#	tools\lng.generator.exe -nc -i lang.ini -ol "$(OUTDIR)" farlang.templ
-
-#.PHONY: depfile
-#depfile:
-#	$(GAWK) -f .\scripts\mkdep.awk mkdep.list > $(DEPFILE)
 
 .PHONY: build
-build: "$(OUTDIR)\$(OUTNAME).exe"
+build: "$(OUTDIR)\$(OUTNAME).exe" $(MINGWRES)
+
+# Due to bugs(?) of MinGW's windres it fails to
+# include properly our truecolor images and icons
+mingw: $(MINGW_RES_FILE)
 
 .PHONY: AllDirs
 AllDirs:
@@ -215,7 +211,7 @@ AllDirs:
 	if not exist "$(INTDIR)" mkdir "$(INTDIR)"
 	if not exist "$(CODDIR)" mkdir "$(CODDIR)"
 
-"$(OUTDIR)\$(OUTNAME).exe": $(DEF_FILE) $(LINK_OBJS) $(RES_FILE) conemu.gcc.manifest
+"$(OUTDIR)\$(OUTNAME).exe": $(DEF_FILE) $(LINK_OBJS) $(RES_FILE) $(MINGWRES) conemu.gcc.manifest
 	echo linking $@
 !ifndef LINK_ULINK
 	$(LINK) @<<
@@ -264,9 +260,13 @@ AllDirs:
 #	$(CPPFLAGS) $<
 # <<
 
-$(RES_FILE): ConEmu.rc Version.h
+$(RES_FILE): ConEmu.rc ConEmu.rc2 Externals.rc2 Version.h Version.rc2
 	echo compiling resource file
-	$(RC) $(RFLAGS) ConEmu.rc
+	$(RC) $(RFLAGS) /fo"$(RES_FILE)" ConEmu.rc
+
+$(MINGW_RES_FILE): ConEmuMinGW.rc Externals.rc2
+	echo compiling mingw resource file
+	$(RC) $(RFLAGS) /fo"$(MINGW_RES_FILE)" ConEmuMINGW.rc
 
 #!ifdef USEDEPS
 #!include "$(DEPFILE)"
@@ -343,6 +343,8 @@ $(INTDIR)\FrameHolder.obj: FrameHolder.cpp FrameHolder.h
 $(INTDIR)\GestureEngine.obj: GestureEngine.cpp GestureEngine.h
 
 $(INTDIR)\GuiServer.obj: GuiServer.cpp GuiServer.h ConEmu.h RealConsole.h VirtualConsole.h
+
+$(INTDIR)\HkFunc.obj: ../common/HkFunc.cpp ../common/HkFunc.h
 
 $(INTDIR)\HooksUnlocker.obj: HooksUnlocker.cpp HooksUnlocker.h
 
@@ -476,7 +478,7 @@ $(INTDIR)\VConRelease.obj: VConRelease.cpp VConRelease.h VirtualConsole.h VConCh
 
 $(INTDIR)\VirtualConsole.obj: VirtualConsole.cpp VConRelease.h VirtualConsole.h VConChild.h VConGroup.h
 
-$(INTDIR)\WConsole.obj: ../common/WConsole.cpp
+$(INTDIR)\WConsoleInfo.obj: ../common/WConsoleInfo.cpp
 
 $(INTDIR)\WFiles.obj: ../common/WFiles.cpp ../common/WFiles.h
 
@@ -491,8 +493,8 @@ $(INTDIR)\WUser.obj: ../common/WUser.cpp
 #LINK_OBJS end
 ##############
 
-.PHONY: CLEAN
-CLEAN:
+.PHONY: clean
+clean:
 	@echo Copying release files
 	@if not exist "$(RELEASEDIR)\$(NULL)" mkdir "$(RELEASEDIR)"
 	@echo moving `$(OUTDIR)\$(OUTNAME).exe` to `$(RELEASEDIR)`
@@ -500,6 +502,6 @@ CLEAN:
 	@echo moving `$(MAP)` to `$(RELEASEDIR)`
 	@move "$(MAP)" $(RELEASEDIR)
 !ifndef NO_RELEASE_PDB
-	@echo moving `$(PDB)` to `$(RELEASEDIR)\$(PDB_NAME)`
-	@move "$(PDB)" "$(RELEASEDIR)\$(PDB_NAME)"
+	@echo copying `$(PDB)` to `$(RELEASEDIR)\$(PDB_NAME)`
+	@copy "$(PDB)" "$(RELEASEDIR)\$(PDB_NAME)"
 !endif

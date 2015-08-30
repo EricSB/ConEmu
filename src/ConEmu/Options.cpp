@@ -368,6 +368,7 @@ void Settings::ReleasePointers()
 	ProgressesCount = 0;
 
 	UpdSet.FreePointers();
+	SafeFree(FindOptions.pszText);
 }
 
 Settings::~Settings()
@@ -638,6 +639,7 @@ void Settings::InitSettings()
 	isUseCurrentSizePos = true; // Show in settings dialog and save current window size/pos
 	//isFullScreen = false;
 	isHideCaption = false; mb_HideCaptionAlways = false; isQuakeStyle = false; nQuakeAnimation = QUAKEANIMATION_DEF;
+	isRestore2ActiveMon = false;
 	isHideChildCaption = true;
 	isFocusInChildWindows = true;
 	nHideCaptionAlwaysFrame = HIDECAPTIONALWAYSFRAME_DEF; nHideCaptionAlwaysDelay = 2000; nHideCaptionAlwaysDisappear = 2000;
@@ -668,6 +670,7 @@ void Settings::InitSettings()
 	isRegisterAgressive = true;
 	isDefaultTerminalNoInjects = false;
 	isDefaultTerminalNewWindow = false;
+	isDefaultTerminalDebugLog = false;
 	nDefaultTerminalConfirmClose = 1 /* Always */;
 	SetDefaultTerminalApps(L"explorer.exe"/* to default value */); // "|"-delimited string -> MSZ
 
@@ -685,14 +688,6 @@ void Settings::InitSettings()
 	isPortableReg = false;
 	#endif
 
-	// By default (ConInMode==-1, DisableMouse==false)
-	// ==> turn OFF "Quick edit mode", turn ON "Insert mode"
-	// User can change behavior using mask. E.g 0x00300000 - uncheck both
-	// HIWORD(nConInMode) - mask (for clearing bits), LOWORD(nConInMode) - OR operator
-	// ((ENABLE_QUICK_EDIT_MODE|ENABLE_INSERT_MODE)<<16) | (ENABLE_QUICK_EDIT_MODE|ENABLE_INSERT_MODE);
-	// Note, ENABLE_EXTENDED_FLAGS is always turned ON
-	// This (nConInMode) is passed to the ConEmuC (server) with "/CINMODE=" switch
-	nConInMode = (DWORD)-1;
 	isDisableMouse = false;
 
 	nSlideShowElapse = 2500;
@@ -2432,7 +2427,6 @@ void Settings::LoadSettings(bool& rbNeedCreateVanilla, const SettingsStorage* ap
 
 		// Debugging
 		reg->Load(L"ConVisible", isConVisible);
-		reg->Load(L"ConInMode", nConInMode);
 
 
 		reg->Load(L"UseInjects", isUseInjects); //MinMax(isUseInjects, BST_INDETERMINATE);
@@ -2443,6 +2437,7 @@ void Settings::LoadSettings(bool& rbNeedCreateVanilla, const SettingsStorage* ap
 		reg->Load(L"DefaultTerminalAgressive", isRegisterAgressive);
 		reg->Load(L"DefaultTerminalNoInjects", isDefaultTerminalNoInjects);
 		reg->Load(L"DefaultTerminalNewWindow", isDefaultTerminalNewWindow);
+		reg->Load(L"DefaultTerminalDebugLog", isDefaultTerminalDebugLog);
 		reg->Load(L"DefaultTerminalConfirm", nDefaultTerminalConfirmClose);
 		{
 		wchar_t* pszApps = NULL;
@@ -2564,6 +2559,7 @@ void Settings::LoadSettings(bool& rbNeedCreateVanilla, const SettingsStorage* ap
 		reg->Load(L"WindowMode", _WindowMode); if (_WindowMode!=rFullScreen && _WindowMode!=rMaximized && _WindowMode!=rNormal) _WindowMode = rNormal;
 		reg->Load(L"IntegralSize", mb_IntegralSize);
 		reg->Load(L"QuakeStyle", isQuakeStyle);
+		reg->Load(L"Restore2ActiveMon", isRestore2ActiveMon);
 		reg->Load(L"QuakeAnimation", nQuakeAnimation); MinMax(nQuakeAnimation, QUAKEANIMATION_MAX);
 		reg->Load(L"HideCaption", isHideCaption);
 		reg->Load(L"HideChildCaption", isHideChildCaption);
@@ -2957,7 +2953,8 @@ void Settings::LoadSettings(bool& rbNeedCreateVanilla, const SettingsStorage* ap
 
 		reg->Load(L"DisableAllFlashing", isDisableAllFlashing); if (isDisableAllFlashing>2) isDisableAllFlashing = 2;
 
-		/* FindText: bMatchCase, bMatchWholeWords, bFreezeConsole, bHighlightAll */
+		// FindText: bMatchCase, bMatchWholeWords, bFreezeConsole, bHighlightAll
+		// FindOptions.pszText may be used to pre-fill search dialog field if search-bar is hidden
 		reg->Load(L"FindText", &FindOptions.pszText);
 		reg->Load(L"FindMatchCase", FindOptions.bMatchCase);
 		reg->Load(L"FindMatchWholeWords", FindOptions.bMatchWholeWords);
@@ -3414,7 +3411,6 @@ BOOL Settings::SaveSettings(BOOL abSilent /*= FALSE*/, const SettingsStorage* ap
 			wndY = rcPos.top;
 		}*/
 		reg->Save(L"ConVisible", isConVisible);
-		reg->Save(L"ConInMode", nConInMode);
 
 		reg->Save(L"UseInjects", isUseInjects);
 
@@ -3424,6 +3420,7 @@ BOOL Settings::SaveSettings(BOOL abSilent /*= FALSE*/, const SettingsStorage* ap
 		reg->Save(L"DefaultTerminalAgressive", isRegisterAgressive);
 		reg->Save(L"DefaultTerminalNoInjects", isDefaultTerminalNoInjects);
 		reg->Save(L"DefaultTerminalNewWindow", isDefaultTerminalNewWindow);
+		reg->Save(L"DefaultTerminalDebugLog", isDefaultTerminalDebugLog);
 		reg->Save(L"DefaultTerminalConfirm", nDefaultTerminalConfirmClose);
 		{
 		wchar_t* pszApps = GetDefaultTerminalApps(); // MSZ -> "|"-delimited string
@@ -3544,6 +3541,7 @@ BOOL Settings::SaveSettings(BOOL abSilent /*= FALSE*/, const SettingsStorage* ap
 		ResetSavedOnExit(); // Раз было инициированное пользователем сохранение настроек - сбросим флажок (mb_ExitSettingsAutoSaved)
 		reg->Save(L"IntegralSize", mb_IntegralSize);
 		reg->Save(L"QuakeStyle", isQuakeStyle);
+		reg->Save(L"Restore2ActiveMon", isRestore2ActiveMon);
 		reg->Save(L"QuakeAnimation", nQuakeAnimation);
 		reg->Save(L"HideCaption", isHideCaption);
 		reg->Save(L"HideChildCaption", isHideChildCaption);
@@ -5106,7 +5104,7 @@ void Settings::CmdTaskSetVkMod(int anIndex, DWORD VkMod)
 // anIndex - 0-based, index of CmdTasks
 // asName - имя, или NULL, если эту группу нужно удалить (хвост сдвигается вверх)
 // asCommands - список команд (скрипт)
-void Settings::CmdTaskSet(int anIndex, LPCWSTR asName, LPCWSTR asGuiArgs, LPCWSTR asCommands)
+void Settings::CmdTaskSet(int anIndex, LPCWSTR asName, LPCWSTR asGuiArgs, LPCWSTR asCommands, CETASKFLAGS aFlags /*= CETF_DONT_CHANGE*/)
 {
 	if (anIndex < 0)
 	{
@@ -5169,6 +5167,9 @@ void Settings::CmdTaskSet(int anIndex, LPCWSTR asName, LPCWSTR asGuiArgs, LPCWST
 	CmdTasks[anIndex]->SetName(asName, anIndex);
 	CmdTasks[anIndex]->SetGuiArg(asGuiArgs);
 	CmdTasks[anIndex]->SetCommands(asCommands);
+
+	if (aFlags != CETF_DONT_CHANGE)
+		CmdTasks[anIndex]->Flags = aFlags;
 
 	if (anIndex >= CmdTaskCount)
 		CmdTaskCount = anIndex+1;

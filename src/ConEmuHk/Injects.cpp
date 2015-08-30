@@ -1,6 +1,6 @@
 ﻿
 /*
-Copyright (c) 2009-2014 Maximus5
+Copyright (c) 2009-2015 Maximus5
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -30,6 +30,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../common/common.hpp"
 #include "../common/ConEmuCheck.h"
 #include "../common/execute.h"
+#include "../common/HkFunc.h"
 #include "../ConEmuCD/ExitCodes.h"
 #include "../common/WObjects.h"
 //#include "ConEmuHooks.h"
@@ -280,9 +281,9 @@ CINJECTHK_EXIT_CODES InjectHooks(PROCESS_INFORMATION pi, BOOL abLogProcess)
 		_ASSERTE(hProcess && hThread);
 		#ifdef _WIN64
 		// Если превышение DWORD в Handle - то запускаемый 32битный обломится. Но вызывается ли он вообще?
-		if (((DWORD)hProcess != (DWORD_PTR)hProcess) || ((DWORD)hThread != (DWORD_PTR)hThread))
+		if ((LODWORD(hProcess) != (DWORD_PTR)hProcess) || (LODWORD(hThread) != (DWORD_PTR)hThread))
 		{
-			_ASSERTE(((DWORD)hProcess == (DWORD_PTR)hProcess) && ((DWORD)hThread == (DWORD_PTR)hThread));
+			_ASSERTE((LODWORD(hProcess) == (DWORD_PTR)hProcess) && (LODWORD(hThread) == (DWORD_PTR)hThread));
 			iRc = CIH_WrongHandleBitness/*-509*/;
 			goto wrap;
 		}
@@ -291,7 +292,7 @@ CINJECTHK_EXIT_CODES InjectHooks(PROCESS_INFORMATION pi, BOOL abLogProcess)
 		msprintf(sz64helper, countof(sz64helper),
 		          L"\"%s\\ConEmuC%s.exe\" /SETHOOKS=%X,%u,%X,%u",
 		          szPluginPath, (ImageBits==64) ? L"64" : L"",
-		          (DWORD)hProcess, pi.dwProcessId, (DWORD)hThread, pi.dwThreadId);
+		          LODWORD(hProcess), pi.dwProcessId, LODWORD(hThread), pi.dwThreadId);
 		STARTUPINFO si = {sizeof(STARTUPINFO)};
 		PROCESS_INFORMATION pi64 = {NULL};
 		LPSECURITY_ATTRIBUTES lpNotInh = LocalSecurity();
@@ -301,7 +302,7 @@ CINJECTHK_EXIT_CODES InjectHooks(PROCESS_INFORMATION pi, BOOL abLogProcess)
 
 		// Добавил DETACHED_PROCESS, чтобы helper не появлялся в списке процессов консоли,
 		// а то у сервера может крышу сорвать, когда helper исчезнет, а приложение еще не появится.
-		BOOL lbHelper = CreateProcess(NULL, sz64helper, &SecInh, &SecInh, TRUE, HIGH_PRIORITY_CLASS|DETACHED_PROCESS, NULL, NULL, &si, &pi64);
+		BOOL lbHelper = hkFunc.createProcess(NULL, sz64helper, &SecInh, &SecInh, TRUE, HIGH_PRIORITY_CLASS|DETACHED_PROCESS, NULL, NULL, &si, &pi64);
 
 		if (!lbHelper)
 		{

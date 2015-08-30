@@ -2584,7 +2584,9 @@ LRESULT CConEmuSize::OnWindowPosChanging(HWND hWnd, UINT uMsg, WPARAM wParam, LP
 	// Чтобы правильно был рассчитан размер консоли
 	bool bResized = CheckDpiOnMoving(p);
 
-	if (bResized)
+	// Add `SWP_NOSIZE` check because in that case {p->cx,p->cy} are 0
+	// therefore OnSize CalcRect will return invalid result on empty src rect
+	if (bResized && !(p->flags & SWP_NOSIZE))
 	{
 		RECT rcWnd = {0,0,p->cx,p->cy};
 		//CVConGroup::SyncAllConsoles2Window(rcWnd, CER_MAIN, true);
@@ -3765,7 +3767,7 @@ void CConEmuSize::EvalNewNormalPos(const MONITORINFO& miOld, HMONITOR hNextMon, 
 	rcNew.bottom = rcNew.top + Height;
 }
 
-bool CConEmuSize::JumpNextMonitor(HWND hJumpWnd, HMONITOR hJumpMon, bool Next, const RECT rcJumpWnd)
+bool CConEmuSize::JumpNextMonitor(HWND hJumpWnd, HMONITOR hJumpMon, bool Next, const RECT rcJumpWnd, LPRECT prcNewPos /*= NULL*/)
 {
 	wchar_t szInfo[100];
 	RECT rcMain = {};
@@ -3859,6 +3861,10 @@ bool CConEmuSize::JumpNextMonitor(HWND hJumpWnd, HMONITOR hJumpMon, bool Next, c
 		CVConGroup::PreReSize(WindowMode, rcNewMain);
 	}
 
+	if (prcNewPos)
+	{
+		*prcNewPos = rcNewMain;
+	}
 
 	// И перемещение
 	SetWindowPos(hJumpWnd, NULL, rcNewMain.left, rcNewMain.top, rcNewMain.right-rcNewMain.left, rcNewMain.bottom-rcNewMain.top, SWP_NOZORDER/*|SWP_DRAWFRAME*/|SWP_NOCOPYBITS);
@@ -3878,7 +3884,7 @@ bool CConEmuSize::JumpNextMonitor(HWND hJumpWnd, HMONITOR hJumpMon, bool Next, c
 		m_JumpMonitor.bInJump = false;
 	}
 
-	return false;
+	return true;
 }
 
 // inMode: wmNormal, wmMaximized, wmFullScreen
@@ -4801,7 +4807,10 @@ LRESULT CConEmuSize::OnDpiChanged(UINT dpiX, UINT dpiY, LPRECT prcSuggested, boo
 			// Если вызывает наш внутренний Tile/Snap,
 			// и новый режим "прилепленный" к краю экрана,
 			// то не будет обновлен желаемый размер wmNormal консоли
-			ConEmuWindowCommand Tile = IsRectEmpty(&rc) ? m_TileMode : EvalTileMode(rc);
+			// 150816 - Called from JumpNextMonitor, EvalTileMode raises an assertion (IsWindowModeChanged)
+			ConEmuWindowCommand Tile = (m_JumpMonitor.bInJump || IsRectEmpty(&rc))
+				? m_TileMode
+				: EvalTileMode(rc);
 			if (Tile != cwc_Current)
 			{
 				RECT rcOld = IsRectEmpty(&mrc_StoredNormalRect) ? GetDefaultRect() : mrc_StoredNormalRect;
@@ -5768,9 +5777,23 @@ void CConEmuSize::DoMinimizeRestore(SingleInstanceShowHideType ShowHideType /*= 
 	//    аргумент /showhideTSA  --> ShowHideType = sih_ShowHideTSA
 	SingleInstanceShowHideType cmd = sih_None;
 
+	// gh#255, old#1065: Move window to "active" monitor
+	if ((ShowHideType == sih_None) && gpSet->isRestore2ActiveMon)
+	{
+		POINT ptCur = {}; GetCursorPos(&ptCur);
+		RECT rcCur = CalcRect(CER_MAIN, NULL);
+		HMONITOR hMonCur = MonitorFromRect(&rcCur, MONITOR_DEFAULTTONEAREST);
+		HMONITOR hMonAct = MonitorFromPoint(ptCur, MONITOR_DEFAULTTONEAREST);
+		if (hMonCur && hMonAct && (hMonCur != hMonAct))
+		{
+			ShowHideType = sih_Show;
+			bVis = false;
+		}
+	}
+
+	// Choose default action otherwise
 	if (ShowHideType == sih_None)
 	{
-		// По настройкам
 		ShowHideType = gpSet->isMinToTray() ? sih_ShowHideTSA : sih_ShowMinimize;
 	}
 
@@ -5928,6 +5951,22 @@ void CConEmuSize::DoMinimizeRestore(SingleInstanceShowHideType ShowHideType /*= 
 		if (gpSet->isQuakeStyle)
 		{
 			RECT rcWnd = GetDefaultRect();
+
+			if (gpSet->isRestore2ActiveMon)
+			{
+				HMONITOR hMonCur = MonitorFromRect(&rcWnd, MONITOR_DEFAULTTONEAREST);
+				POINT ptCur = {}; GetCursorPos(&ptCur);
+				HMONITOR hMonAct = MonitorFromPoint(ptCur, MONITOR_DEFAULTTONEAREST);
+				if (hMonCur && hMonAct && (hMonCur != hMonAct))
+				{
+					if (JumpNextMonitor(ghWnd, hMonAct, true, rcWnd, &m_QuakePrevSize.PreSlidedSize))
+					{
+						RECT rcNew = GetDefaultRect();
+						rcWnd = rcNew;
+					}
+				}
+			}
+
 			SetWindowPos(ghWnd, NULL, rcWnd.left, rcWnd.top, 0,0, SWP_NOZORDER|SWP_NOSIZE);
 		}
 

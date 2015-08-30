@@ -73,12 +73,12 @@ enum FarMacroVersion
 #include "Hotkeys.h"
 #include "SetTypes.h"
 #include "SetAppSettings.h"
+#include "SetCmdTask.h"
 #include "UpdateSet.h"
 
 class CSettings;
 class CSetDlgButtons;
 struct CommandHistory;
-struct CommandTasks;
 struct ColorPalette;
 
 
@@ -158,6 +158,7 @@ struct Settings
 		bool isRegisterAgressive;
 		bool isDefaultTerminalNoInjects;
 		bool isDefaultTerminalNewWindow;
+		bool isDefaultTerminalDebugLog;
 		BYTE nDefaultTerminalConfirmClose; // "Press Enter to close console". 0 - Auto, 1 - Always, 2 - Never
 		wchar_t* GetDefaultTerminalApps(); // "|" delimited
 		const wchar_t* GetDefaultTerminalAppsMSZ(); // "\0" delimited
@@ -179,7 +180,7 @@ struct Settings
 		const CommandTasks* CmdTaskGet(int anIndex); // 0-based, index of CmdTasks. "-1" == autosaved task
 		const CommandTasks* CmdTaskGetByName(LPCWSTR asTaskName);
 		void CmdTaskSetVkMod(int anIndex, DWORD VkMod); // 0-based, index of CmdTasks
-		void CmdTaskSet(int anIndex, LPCWSTR asName, LPCWSTR asGuiArgs, LPCWSTR asCommands); // 0-based, index of CmdTasks
+		void CmdTaskSet(int anIndex, LPCWSTR asName, LPCWSTR asGuiArgs, LPCWSTR asCommands, CETASKFLAGS aFlags = CETF_DONT_CHANGE); // 0-based, index of CmdTasks
 		bool CmdTaskXch(int anIndex1, int anIndex2); // 0-based, index of CmdTasks
 
 		const ColorPalette* PaletteGet(int anIndex); // 0-based, index of Palettes, or -1 for "<Current color scheme>"
@@ -407,6 +408,8 @@ struct Settings
 		//reg->Load(L"QuakeStyle", isQuakeStyle);
 		BYTE isQuakeStyle; // 0 - NoQuake, 1 - Quake, 2 - Quake+HideOnLoseFocus
 		DWORD nQuakeAnimation;
+		//reg->Load(L"Restore2ActiveMon", isRestore2ActiveMon);
+		bool isRestore2ActiveMon;
 		protected:
 		//reg->Load(L"HideCaptionAlways", mb_HideCaptionAlways);
 		bool mb_HideCaptionAlways;
@@ -441,8 +444,6 @@ struct Settings
 		bool isExtendUCharMap;
 		//reg->Load(L"DisableMouse", isDisableMouse);
 		bool isDisableMouse;
-		//reg->Load(L"ConInMode", nConInMode);
-		DWORD nConInMode;
 		//reg->Load(L"MouseSkipActivation", isMouseSkipActivation);
 		bool isMouseSkipActivation;
 		//reg->Load(L"MouseSkipMoving", isMouseSkipMoving);
@@ -871,6 +872,7 @@ struct Settings
 		bool isShellNoZoneCheck;
 
 		// FindText: bMatchCase, bMatchWholeWords, bFreezeConsole, bHighlightAll;
+		// FindOptions.pszText may be used to pre-fill search dialog field if search-bar is hidden
 		FindTextOptions FindOptions;
 
 

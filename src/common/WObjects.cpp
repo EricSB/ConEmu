@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <windows.h>
 #include <TlHelp32.h>
 #include "CmdLine.h"
+#include "HkFunc.h"
 #include "WObjects.h"
 
 #if !defined(CONEMU_MINIMAL)
@@ -553,7 +554,7 @@ bool GetOsVersionInformational(OSVERSIONINFO* pOsVer)
 	#pragma warning(disable: 4996)
 	BOOL result = GetVersionEx(pOsVer);
 	#pragma warning(default: 4996)
-	return (result != NULL);
+	return (result != FALSE);
 }
 
 bool IsWinVerOrHigher(WORD OsVer)
@@ -854,7 +855,7 @@ bool isTerminalMode()
 				}
 				nProcCount++;
 			} while (Process32Next(hSnap, &P));
-			// Snapshoot больше не нужен
+			// Snapshot больше не нужен
 			CloseHandle(hSnap);
 
 			int nSteps = 128; // защита от зацикливания
@@ -916,7 +917,7 @@ bool IsModuleValid(HMODULE module, BOOL abTestVirtual /*= TRUE*/)
 	if (abTestVirtual)
 	{
 		// Issue 881
-		lpTest = (LPBYTE)VirtualAlloc((LPVOID)module, cbCommitSize, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+		lpTest = (LPBYTE)hkFunc.virtualAlloc((LPVOID)module, cbCommitSize, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
 		if (lpTest)
 		{
 			// If we can lock mem region with (IMAGE_DOS_HEADER) of checking module

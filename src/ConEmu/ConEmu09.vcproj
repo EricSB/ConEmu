@@ -19,7 +19,7 @@
       <Tool Name="VCPreLinkEventTool" />
       <Tool Name="VCLinkerTool" AdditionalDependencies="comctl32.lib Shlwapi.lib version.lib gdiplus.lib Winmm.lib Netapi32.lib" OutputFile="E:\Source\FARUnicode\trunk\unicode_far\Debug.32.vc\ConEmu\ConEmu.exe" LinkIncremental="2" GenerateDebugInformation="true" SubSystem="2" RandomizedBaseAddress="1" DataExecutionPrevention="0" TargetMachine="1" KeyFile="" />
       <Tool Name="VCALinkTool" />
-      <Tool Name="VCManifestTool" AdditionalManifestFiles="conemu.manifest;DeclareDPIAware.manifest" />
+      <Tool Name="VCManifestTool" AdditionalManifestFiles="conemu.manifest" />
       <Tool Name="VCXDCMakeTool" />
       <Tool Name="VCBscMakeTool" />
       <Tool Name="VCFxCopTool" />
@@ -397,6 +397,7 @@
       <File RelativePath="..\common\Common.cpp" />
       <File RelativePath="..\common\ConEmuCheck.cpp" />
       <File RelativePath="..\common\execute.cpp" />
+      <File RelativePath="..\common\HkFunc.cpp" />
       <File RelativePath="..\common\MAssert.cpp" />
       <File RelativePath="..\common\Memory.cpp" />
       <File RelativePath="..\common\MEvent.cpp" />
@@ -413,7 +414,7 @@
       <File RelativePath="..\common\RConStartArgs.cpp" />
       <File RelativePath="..\common\RgnDetect.cpp" />
       <File RelativePath="..\common\SetEnvVar.cpp" />
-      <File RelativePath="..\common\WConsole.cpp" />
+      <File RelativePath="..\common\WConsoleInfo.cpp" />
       <File RelativePath="..\common\WFiles.cpp" />
       <File RelativePath="..\common\WObjects.cpp" />
       <File RelativePath="..\common\WRegistry.cpp" />
@@ -505,6 +506,7 @@
       <File RelativePath="..\common\defines.h" />
       <File RelativePath="..\common\Dump.h" />
       <File RelativePath="..\common\execute.h" />
+      <File RelativePath="..\common\HkFunc.h" />
       <File RelativePath="..\common\MArray.h" />
       <File RelativePath="..\common\Memory.h" />
       <File RelativePath="..\common\MEvent.h" />
@@ -528,7 +530,7 @@
       <File RelativePath="..\common\StartupEnvDef.h" />
       <File RelativePath="..\common\StartupEnvEx.h" />
       <File RelativePath="..\common\UnicodeChars.h" />
-      <File RelativePath="..\common\WConsole.h" />
+      <File RelativePath="..\common\WConsoleInfo.h" />
       <File RelativePath="..\common\WFiles.h" />
       <File RelativePath="..\common\WObjects.h" />
       <File RelativePath="..\common\WRegistry.h" />

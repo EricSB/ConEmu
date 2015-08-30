@@ -556,7 +556,7 @@ void CSettings::InitVars_Pages()
 		{IDD_SPG_WNDSIZEPOS,  1, L"Size & Pos",     thi_SizePos    /* OnInitDialog_WndSizePos */},
 		{IDD_SPG_SHOW,        1, L"Appearance",     thi_Show       /* OnInitDialog_Show */},
 		{IDD_SPG_BACK,        1, L"Background",     thi_Backgr     /* OnInitDialog_Background */},
-		{IDD_SPG_TABS,        1, L"Tabs",           thi_Tabs       /* OnInitDialog_Tabs */},
+		{IDD_SPG_TABS,        1, L"Tab bar",        thi_Tabs       /* OnInitDialog_Tabs */},
 		{IDD_SPG_CONFIRM,     1, L"Confirm",        thi_Confirm    /* OnInitDialog_Confirm */},
 		{IDD_SPG_TASKBAR,     1, L"Task bar",       thi_Taskbar    /* OnInitDialog_Taskbar */},
 		{IDD_SPG_UPDATE,      1, L"Update",         thi_Update     /* OnInitDialog_Update */},
@@ -707,7 +707,7 @@ bool CSettings::SetOption(LPCWSTR asName, LPCWSTR asValue)
 	if (!lstrcmpi(asName, L"FarGotoEditorPath"))
 	{
 		wchar_t* pszNewVal = lstrdup(asValue);
-		if (pszNewVal && pszNewVal)
+		if (pszNewVal && *pszNewVal)
 		{
 			wchar_t* pszOld = (wchar_t*)InterlockedExchangePointer((PVOID*)&gpSet->sFarGotoEditor, pszNewVal);
 			SafeFree(pszOld);
@@ -1961,9 +1961,7 @@ LRESULT CSettings::OnInitDialog_WndSizePos(HWND hWnd2, bool abInitial)
 	else
 		checkRadioButton(hWnd2, rNormal, rFullScreen, rNormal);
 
-	//swprintf_c(temp, L"%i", wndWidth);   SetDlgItemText(hWnd2, tWndWidth, temp);
 	SendDlgItemMessage(hWnd2, tWndWidth, EM_SETLIMITTEXT, 6, 0);
-	//swprintf_c(temp, L"%i", wndHeight);  SetDlgItemText(hWnd2, tWndHeight, temp);
 	SendDlgItemMessage(hWnd2, tWndHeight, EM_SETLIMITTEXT, 6, 0);
 
 	UpdateSize(gpConEmu->WndWidth, gpConEmu->WndHeight);
@@ -2004,6 +2002,8 @@ LRESULT CSettings::OnInitDialog_WndSizePos(HWND hWnd2, bool abInitial)
 	SetDlgItemInt(hWnd2, tPadSize, gpSet->nCenterConsolePad, FALSE);
 
 	checkDlgButton(hWnd2, cbIntegralSize, !gpSet->mb_IntegralSize);
+
+	checkDlgButton(hWnd2, cbRestore2ActiveMonitor, gpSet->isRestore2ActiveMon);
 
 	checkDlgButton(hWnd2, cbSnapToDesktopEdges, gpSet->isSnapToDesktopEdges);
 
@@ -2118,9 +2118,9 @@ INT_PTR CSettings::pageOpProc_Start(HWND hWnd2, UINT messg, WPARAM wParam, LPARA
 						EnableWindow(GetDlgItem(hWnd2, cbStartTasksFile), (CB == rbStartTasksFile));
 						//
 						EnableWindow(GetDlgItem(hWnd2, lbStartNamedTask), (CB == rbStartNamedTask));
-						// -- пока не поддерживается
-						EnableWindow(GetDlgItem(hWnd2, cbStartFarRestoreFolders), FALSE/*(CB == rbStartLastTabs)*/);
-						EnableWindow(GetDlgItem(hWnd2, cbStartFarRestoreEditors), FALSE/*(CB == rbStartLastTabs)*/);
+						// -- not supported yet
+						ShowWindow(GetDlgItem(hWnd2, cbStartFarRestoreFolders), SW_HIDE);
+						ShowWindow(GetDlgItem(hWnd2, cbStartFarRestoreEditors), SW_HIDE);
 						//
 						EnableWindow(GetDlgItem(hWnd2, tStartGroupCommands), (CB == rbStartNamedTask) || (CB == rbStartLastTabs));
 						// Task source
@@ -3585,6 +3585,7 @@ LRESULT CSettings::OnInitDialog_DefTerm(HWND hWnd2, bool abInitial)
 	CheckDlgButton(hWnd2, cbDefTermAgressive, gpSet->isRegisterAgressive);
 	CheckDlgButton(hWnd2, cbDefaultTerminalNoInjects, gpSet->isDefaultTerminalNoInjects);
 	CheckDlgButton(hWnd2, cbDefaultTerminalUseExisting, !gpSet->isDefaultTerminalNewWindow);
+	CheckDlgButton(hWnd2, cbDefaultTerminalDebugLog, gpSet->isDefaultTerminalDebugLog);
 	CheckRadioButton(hWnd2, rbDefaultTerminalConfAuto, rbDefaultTerminalConfNever, rbDefaultTerminalConfAuto+gpSet->nDefaultTerminalConfirmClose);
 	wchar_t* pszApps = gpSet->GetDefaultTerminalApps();
 	_ASSERTE(pszApps!=NULL);
@@ -4945,6 +4946,7 @@ LRESULT CSettings::OnEditChanged(HWND hWnd2, WPARAM wParam, LPARAM lParam)
 
 	case tTabSkipWords:
 	{
+		SafeFree(gpSet->pszTabSkipWords);
 		gpSet->pszTabSkipWords = GetDlgItemTextPtr(hWnd2, TB);
 		gpConEmu->mp_TabBar->Update(TRUE);
 		break;
@@ -9026,7 +9028,6 @@ void CSettings::Performance(UINT nID, BOOL bEnd)
 			// Performance
 			wchar_t sTemp[128];
 			//Нихрена это не мегагерцы. Например на "AMD Athlon 64 X2 1999 MHz" здесь отображается "0.004 GHz"
-			//swprintf(sTemp, L"Performance counters (%.3f GHz)", ((double)(mn_Freq/1000)/1000000));
 			_wsprintf(sTemp, SKIPLEN(countof(sTemp)) L"Performance counters (%I64i)", ((i64)(mn_Freq/1000)));
 			SetDlgItemText(GetPage(thi_Info), nID, sTemp);
 			// Обновить сразу (значений еще нет)
@@ -11165,10 +11166,7 @@ BOOL CSettings::GetFontNameFromFile_TTF(LPCTSTR lpszFilePath, wchar_t (&rsFontNa
 		//f.Read(&tblDir, sizeof(TT_TABLE_DIRECTORY));
 		if (ReadFile(f, &tblDir, sizeof(TT_TABLE_DIRECTORY), &(dwRead=0), NULL) && dwRead)
 		{
-			//strncpy(szRetVal, tblDir.szTag, 4); szRetVal[4] = 0;
-			//if (lstrcmpi(szRetVal, L"name") == 0)
-			//if (memcmp(tblDir.szTag, "name", 4) == 0)
-			if (strnicmp(tblDir.szTag, "name", 4) == 0) //-V112
+			if (lstrcmpni(tblDir.szTag, "name", 4) == 0) //-V112
 			{
 				bFound = TRUE;
 				tblDir.uLength = SWAPLONG(tblDir.uLength);
@@ -11319,7 +11317,7 @@ BOOL CSettings::GetFontNameFromFile_OTF(LPCTSTR lpszFilePath, wchar_t (&rsFontNa
 
 	root.NumTables = SWAPWORD(root.NumTables);
 
-	if (strnicmp(root.szTag, "OTTO", 4) != 0) //-V112
+	if (lstrcmpni(root.szTag, "OTTO", 4) != 0) //-V112
 		goto wrap; // Не поддерживается
 
 
@@ -11328,7 +11326,7 @@ BOOL CSettings::GetFontNameFromFile_OTF(LPCTSTR lpszFilePath, wchar_t (&rsFontNa
 		//f.Read(&tblDir, sizeof(TT_TABLE_DIRECTORY));
 		if (ReadFile(f, &tbl, sizeof(tbl), &(dwRead=0), NULL) && dwRead)
 		{
-			if (strnicmp(tbl.szTag, "name", 4) == 0) //-V112
+			if (lstrcmpni(tbl.szTag, "name", 4) == 0) //-V112
 			{
 				bFound = TRUE;
 				tbl.Length = SWAPLONG(tbl.Length);

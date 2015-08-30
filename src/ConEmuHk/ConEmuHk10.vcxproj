@@ -844,9 +844,11 @@
     <ClInclude Include="..\common\defines.h" />
     <ClInclude Include="..\common\DefTermBase.h" />
     <ClInclude Include="..\common\Execute.h" />
+    <ClInclude Include="..\common\HkFunc.h" />
     <ClInclude Include="..\common\InQueue.h" />
     <ClInclude Include="..\common\MConHandle.h" />
     <ClInclude Include="..\common\Memory.h" />
+    <ClInclude Include="..\common\MFileLog.h" />
     <ClInclude Include="..\common\MSection.h" />
     <ClInclude Include="..\common\MSectionSimple.h" />
     <ClInclude Include="..\common\MSecurity.h" />
@@ -860,12 +862,14 @@
     <ClInclude Include="..\common\WObjects.h" />
     <ClInclude Include="..\common\WThreads.h" />
     <ClInclude Include="..\ConEmuCD\ExitCodes.h" />
+    <ClInclude Include="..\modules\minhook\include\MinHook.h" />
     <ClInclude Include="Ansi.h" />
     <ClInclude Include="ConEmuHooks.h" />
     <ClInclude Include="Console2.h" />
     <ClInclude Include="ExtConsole.h" />
     <ClInclude Include="GuiAttach.h" />
     <ClInclude Include="Injects.h" />
+    <ClInclude Include="MainThread.h" />
     <ClInclude Include="RegHooks.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="SetHook.h" />
@@ -882,10 +886,12 @@
     <ClCompile Include="..\common\ConsoleMixAttr.cpp" />
     <ClCompile Include="..\common\ConsoleRead.cpp" />
     <ClCompile Include="..\common\Execute.cpp" />
+    <ClCompile Include="..\common\HkFunc.cpp" />
     <ClCompile Include="..\common\InQueue.cpp" />
     <ClCompile Include="..\common\MAssert.cpp" />
     <ClCompile Include="..\common\MConHandle.cpp" />
     <ClCompile Include="..\common\Memory.cpp" />
+    <ClCompile Include="..\common\MFileLog.cpp" />
     <ClCompile Include="..\common\MSection.cpp" />
     <ClCompile Include="..\common\MSectionSimple.cpp" />
     <ClCompile Include="..\common\MSecurity.cpp" />
@@ -894,18 +900,24 @@
     <ClCompile Include="..\common\WConsole.cpp" />
     <ClCompile Include="..\common\WObjects.cpp" />
     <ClCompile Include="..\common\WThreads.cpp" />
+    <ClCompile Include="..\modules\minhook\src\buffer.c" />
+    <ClCompile Include="..\modules\minhook\src\hook.c" />
+    <ClCompile Include="..\modules\minhook\src\trampoline.c" />
     <ClCompile Include="Ansi.cpp" />
     <ClCompile Include="ConEmuHooks.cpp" />
     <ClCompile Include="DefTermHk.cpp" />
     <ClCompile Include="Entry.cpp" />
     <ClCompile Include="ExtConsole.cpp" />
     <ClCompile Include="GuiAttach.cpp" />
+    <ClCompile Include="hde.c" />
     <ClCompile Include="Injects.cpp" />
+    <ClCompile Include="MainThread.cpp" />
     <ClCompile Include="RegHooks.cpp" />
     <ClCompile Include="SetHook.cpp" />
     <ClCompile Include="ShellProcessor.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\modules\minhook\LICENSE.txt" />
     <None Include="export.def" />
     <None Include="!Todo.txt" />
   </ItemGroup>

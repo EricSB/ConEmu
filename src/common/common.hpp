@@ -85,7 +85,7 @@ typedef struct _CONSOLE_SELECTION_INFO
 
 #define RealConsoleClass L"ConsoleWindowClass"
 #define WineConsoleClass L"WineConsoleClass"
-#define isConsoleClass(sClass) (lstrcmp(sClass, RealConsoleClass)==0 || lstrcmp(sClass, WineConsoleClass)==0)
+// functions isConsoleClass & isConsoleWindow are defined in ConEmuCheck.cpp
 
 // Some ANSI & Controls
 #define DSC 0x90
@@ -113,6 +113,7 @@ typedef struct _CONSOLE_SELECTION_INFO
 #define CEREPORTBUG    CEWIKIBASE L"Issues.html"
 #define CEREPORTCRASH  CEWIKIBASE L"Issues.html"
 #define CEWHATSNEW     CEWIKIBASE L"Whats_New.html"
+#define CEZONEID       CEWIKIBASE L"ZoneId.html"
 
 
 // EnvVars
@@ -202,12 +203,12 @@ typedef struct _CONSOLE_SELECTION_INFO
 #define CESERVERQUERYNAME   L"\\\\%s\\pipe\\ConEmuSrvQuery%u" // ConEmuC_PID
 #define CESERVERWRITENAME   L"\\\\%s\\pipe\\ConEmuSrvWrite%u" // ConEmuC_PID
 #define CESERVERREADNAME    L"\\\\%s\\pipe\\ConEmuSrvRead%u"  // ConEmuC_PID
-#define CEGUIPIPENAME       L"\\\\%s\\pipe\\ConEmuGui.%08X"   // GetConsoleWindow() // необходимо, чтобы плагин мог общаться с GUI
+#define CEGUIPIPENAME       L"\\\\%s\\pipe\\ConEmuGui.%08X"   // myGetConsoleWindow() // необходимо, чтобы плагин мог общаться с GUI
 															  // ghConEmuWndRoot --> CConEmuMain::GuiServerThreadCommand
 #define CEPLUGINPIPENAME    L"\\\\%s\\pipe\\ConEmuPlugin%u"   // Far_PID
 #define CEHOOKSPIPENAME     L"\\\\%s\\pipe\\ConEmuHk%u"       // PID процесса, в котором крутится Pipe
 
-#define CEINPUTSEMAPHORE    L"ConEmuInputSemaphore.%08X"      // GetConsoleWindow()
+#define CEINPUTSEMAPHORE    L"ConEmuInputSemaphore.%08X"      // myGetConsoleWindow()
 
 // Mapping name formats
 #define CEGUIINFOMAPNAME    L"ConEmuGuiInfoMapping.%u" // --> ConEmuGuiMapping            ( % == dwGuiProcessId )
@@ -454,6 +455,8 @@ const CECMD
 	CECMD_AFFNTYPRIORITY = 85, // QDWORD[0]=Affinity, QDWORD[1]=PRIORITY
 	CECMD_PAUSE          = 86, // DWORD[0]: CEPauseCmd; Returns CEPauseCmd
 	CECMD_REDRAWHWND     = 87, // DWORD[0]: HWND
+	CECMD_LOCKSTATION    = 88, // When user press Win+L
+	CECMD_UNLOCKSTATION  = 89, // CESERVER_REQ_SETSIZE
 /** Команды FAR плагина **/
 	CMD_FIRST_FAR_CMD    = 200,
 	CMD_DRAGFROM         = 200,

@@ -42,16 +42,23 @@ class MFileLog
 		wchar_t* ms_DefPath;
 		HANDLE   mh_LogFile;
 		HRESULT  InitFileName(LPCWSTR asName = NULL, DWORD anPID = 0);
+
+		#if !defined(CONEMU_MINIMAL)
 		static void LogStartEnvInt(LPCWSTR asText, LPARAM lParam, bool bFirst, bool bNewLine);
+		#endif
 	protected:
 		MSectionSimple* mpcs_Lock;
 	public:
 		MFileLog(LPCWSTR asName, LPCWSTR asDir = NULL, DWORD anPID = 0);
 		~MFileLog();
+		bool IsLogOpened();
 		void CloseLogFile();
 		HRESULT CreateLogFile(LPCWSTR asName = NULL, DWORD anPID = 0, DWORD anLevel = 0); // Returns 0 if succeeded, otherwise - GetLastError() code
 		LPCWSTR GetLogFileName();
 		void LogString(LPCSTR asText, bool abWriteTime = true, LPCSTR asThreadName = NULL, bool abNewLine = true, UINT anCP = CP_ACP);
 		void LogString(LPCWSTR asText, bool abWriteTime = true, LPCWSTR asThreadName = NULL, bool abNewLine = true);
+
+		#if !defined(CONEMU_MINIMAL)
 		void LogStartEnv(CEStartupEnv* apStartEnv);
+		#endif
 };

@@ -41,6 +41,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 	#define DEBUGSTRPPCMD(s)
 #endif
 
+// Defines GuiMessageBox
+#include "ConEmuCheck.h"
+
 #ifndef PIPEBUFSIZE
 #define PIPEBUFSIZE 4096
 #endif
@@ -440,7 +443,7 @@ struct PipeServer
 					}
 					else
 					{
-						_ASSERTEX(dwErrT == ERROR_IO_INCOMPLETE);
+						_ASSERTEX(dwErrT == ERROR_IO_INCOMPLETE || dwErrT == ERROR_BROKEN_PIPE);
 						DumpError(pPipe, L"PipeServerThread:GetOverlappedResult failed with 0x%08X", FALSE);
 					}
 				}

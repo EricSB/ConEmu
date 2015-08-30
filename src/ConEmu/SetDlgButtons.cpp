@@ -355,6 +355,9 @@ bool CSetDlgButtons::ProcessButtonClick(HWND hDlg, WORD CB, BYTE uCheck)
 		case cbIntegralSize:
 			OnBtn_IntegralSize(hDlg, CB, uCheck);
 			break;
+		case cbRestore2ActiveMonitor:
+			OnBtn_Restore2ActiveMonitor(hDlg, CB, uCheck);
+			break;
 		case rbScrollbarHide:
 		case rbScrollbarShow:
 		case rbScrollbarAuto:
@@ -893,6 +896,8 @@ bool CSetDlgButtons::ProcessButtonClick(HWND hDlg, WORD CB, BYTE uCheck)
 		case cbDefTermAgressive:
 		case cbDefaultTerminalNoInjects:
 		case cbDefaultTerminalUseExisting:
+		case cbDefaultTerminalDebugLog:
+		case cbApplyDefTerm:
 		case rbDefaultTerminalConfAuto:
 		case rbDefaultTerminalConfAlways:
 		case rbDefaultTerminalConfNever:
@@ -2340,6 +2345,16 @@ void CSetDlgButtons::OnBtn_IntegralSize(HWND hDlg, WORD CB, BYTE uCheck)
 	gpSet->mb_IntegralSize = (uCheck == BST_UNCHECKED);
 
 } // cbIntegralSize
+
+
+// cbRestore2ActiveMonitor
+void CSetDlgButtons::OnBtn_Restore2ActiveMonitor(HWND hDlg, WORD CB, BYTE uCheck)
+{
+	_ASSERTE(CB==cbRestore2ActiveMonitor);
+
+	gpSet->isRestore2ActiveMon = (uCheck != BST_UNCHECKED);
+
+} // cbRestore2ActiveMonitor
 
 
 // rbScrollbarAuto || rbScrollbarHide || rbScrollbarShow
@@ -4282,6 +4297,10 @@ void CSetDlgButtons::OnBtn_DefTerm(HWND hDlg, WORD CB, BYTE uCheck)
 		bSetupDefaultTerminal = gpSet->isSetDefaultTerminal;
 		break;
 
+	case cbApplyDefTerm:
+		bSetupDefaultTerminal = gpSet->isSetDefaultTerminal;
+		break;
+
 	case cbDefaultTerminalStartup:
 	case cbDefaultTerminalTSA:
 	case cbDefTermAgressive:
@@ -4325,6 +4344,10 @@ void CSetDlgButtons::OnBtn_DefTerm(HWND hDlg, WORD CB, BYTE uCheck)
 
 	case cbDefaultTerminalUseExisting:
 		gpSet->isDefaultTerminalNewWindow = !uCheck;
+		break;
+
+	case cbDefaultTerminalDebugLog:
+		gpSet->isDefaultTerminalDebugLog = (uCheck != BST_UNCHECKED);
 		break;
 
 	case rbDefaultTerminalConfAuto:

@@ -62,11 +62,14 @@ $(INTDIR)\Entry.obj \
 $(INTDIR)\Execute.obj \
 $(INTDIR)\ExtConsole.obj \
 $(INTDIR)\GuiAttach.obj \
+$(INTDIR)\HkFunc.obj \
 $(INTDIR)\Injects.obj \
 $(INTDIR)\InQueue.obj \
+$(INTDIR)\MainThread.obj \
 $(INTDIR)\MAssert.obj \
 $(INTDIR)\MConHandle.obj \
 $(INTDIR)\Memory.obj \
+$(INTDIR)\MFileLog.obj \
 $(INTDIR)\MSectionSimple.obj \
 $(INTDIR)\MSection.obj \
 $(INTDIR)\MSecurity.obj \
@@ -80,6 +83,15 @@ $(INTDIR)\WObjects.obj \
 $(INTDIR)\WThreads.obj
 
 USERLIBS = 
+
+
+# minhook begin
+LINK_OBJS = $(LINK_OBJS) \
+$(INTDIR)\buffer.obj \
+$(INTDIR)\hde.obj \
+$(INTDIR)\hook.obj \
+$(INTDIR)\trampoline.obj
+# minhook end
 
 
 !ifndef RC_NAME
@@ -242,11 +254,25 @@ $(DLLFULLNAME) : $(LINK_OBJS) $(RES) $(LINK_DEP)
 	$(CC) @<<
 	$(CFLAGS) $<
 <<
+.c{$(INTDIR)}.obj::
+	$(CC) @<<
+	$(CFLAGS) $<
+<<
+{../modules/minhook/src/}.c{$(INTDIR)}.obj::
+	$(CC) @<<
+	$(CFLAGS) $<
+<<
 !else
 .cpp{$(INTDIR)}.obj:
 	@$(CC) $(CFLAGS) { $< } 
 
 {../common/}.cpp{$(INTDIR)}.obj:
+	@$(CC) $(CFLAGS) { $< } 
+
+.c{$(INTDIR)}.obj:
+	@$(CC) $(CFLAGS) { $< } 
+
+{../modules/minhook/src/}.c{$(INTDIR)}.obj:
 	@$(CC) $(CFLAGS) { $< } 
 !endif
 
@@ -268,16 +294,21 @@ clean:
 	@if not exist "$(RELEASEDIR)\$(NULL)" mkdir "$(RELEASEDIR)"
 	@echo moving `$(DLLFULLNAME)` to `$(RELEASEDIR)\$(OUTNAME).dll`
 	@move $(DLLFULLNAME) $(RELEASEDIR)\$(OUTNAME).dll
-#!ifdef DEBUG
-	@echo moving `$(PDBNAME)` to `$(RELEASEDIR)\$(OUTNAME).pdb`
-	@move $(PDBNAME) $(RELEASEDIR)\$(OUTNAME).pdb
-#!else
-#	@if exist $(PDBNAME) del $(PDBNAME)
-#!endif
+	@echo copying `$(PDBNAME)` to `$(RELEASEDIR)\$(OUTNAME).pdb`
+	@copy $(PDBNAME) $(RELEASEDIR)\$(OUTNAME).pdb
 	@echo moving `$(MAP)` to `$(RELEASEDIR)\$(OUTNAME).map`
 	@move $(MAP) $(RELEASEDIR)\$(OUTNAME).map
 
 
+# minhook begin
+$(INTDIR)\hde.obj:        hde.c
+
+$(INTDIR)\buffer.obj:     ../modules/minhook/src/buffer.c
+
+$(INTDIR)\hook.obj:       ../modules/minhook/src/hook.c
+
+$(INTDIR)\trampoline.obj: ../modules/minhook/src/trampoline.c
+# minhook end
 
 ################
 #LINK_OBJS begin
@@ -312,15 +343,21 @@ $(INTDIR)\ExtConsole.obj: ExtConsole.cpp ExtConsole.h
 
 $(INTDIR)\GuiAttach.obj: GuiAttach.cpp GuiAttach.h
 
+$(INTDIR)\HkFunc.obj: ../common/HkFunc.cpp ../common/HkFunc.h
+
 $(INTDIR)\Injects.obj: Injects.cpp Console2.h
 
 $(INTDIR)\InQueue.obj: ../common/InQueue.cpp
+
+$(INTDIR)\MainThread.obj: MainThread.cpp MainThread.h
 
 $(INTDIR)\MAssert.obj: ../common/MAssert.cpp
 
 $(INTDIR)\MConHandle.obj: ../common/MConHandle.cpp ../common/MConHandle.h
 
 $(INTDIR)\Memory.obj: ../common/Memory.cpp
+
+$(INTDIR)\MFileLog.obj: ../common/MFileLog.cpp ../common/MFileLog.h
 
 $(INTDIR)\MSectionSimple.obj: ../common/MSectionSimple.cpp ../common/MSectionSimple.h ../common/MSection.h
 

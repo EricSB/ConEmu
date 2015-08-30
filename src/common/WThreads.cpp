@@ -1,5 +1,30 @@
 ﻿
-#pragma once
+/*
+Copyright (c) 2015 Maximus5
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+3. The name of the authors may not be used to endorse or promote products
+   derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
 
 #define HIDE_USE_EXCEPTION_INFO
 #include "common.hpp"
@@ -11,10 +36,13 @@
 #define _InterlockedIncrement InterlockedIncrement
 #endif
 
+struct ConEmuThreadStartArg;
+
 #define THREADS_LOG_SIZE 256 // must be power of 2
 #define THREAD_MAX_NAME_LEN 40
 static struct ConEmuThreadInfo
 {
+	ConEmuThreadStartArg* p;
 	BOOL   bActive;
 	DWORD  nThreadID;
 	HANDLE hThread;
@@ -50,12 +78,21 @@ public:
 	};
 };
 
+#pragma optimize( "", off )
+
 DWORD WINAPI apiThreadHelper(LPVOID lpParameter)
 {
 	ConEmuThreadStartArg* p = (ConEmuThreadStartArg*)lpParameter;
-	SetThreadName((DWORD)-1, p->sName);
+
+	#if defined(_MSC_VER) && !defined(CONEMU_MINIMAL)
+	if (IsDebuggerPresent())
+	{
+		SetThreadName((DWORD)-1, p->sName);
+	}
+	#endif
 
 	ConEmuThreadInfo Info = {
+		p,
 		TRUE,
 		GetCurrentThreadId(),
 		p->hThread,
@@ -68,7 +105,7 @@ DWORD WINAPI apiThreadHelper(LPVOID lpParameter)
 	ConEmuThreadInfo* pInfo = NULL;
 	for (INT_PTR c = THREADS_LOG_SIZE; --c >= 0;)
 	{
-		LONG i = _InterlockedIncrement(&g_ThreadsIdx);
+		LONG i = (_InterlockedIncrement(&g_ThreadsIdx) & (THREADS_LOG_SIZE-1));
 		if (!g_Threads[i].bActive)
 		{
 			g_Threads[i] = Info;
@@ -98,6 +135,8 @@ DWORD WINAPI apiThreadHelper(LPVOID lpParameter)
 	delete p;
 	return nRc;
 }
+
+#pragma optimize( "", on )
 
 
 HANDLE apiCreateThread(LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter, LPDWORD lpThreadId, LPCSTR asThreadNameFormat /*= NULL*/, int anFormatArg /*= 0*/)

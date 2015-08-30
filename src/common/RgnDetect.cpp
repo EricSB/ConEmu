@@ -1,6 +1,6 @@
 ﻿
 /*
-Copyright (c) 2009-2012 Maximus5
+Copyright (c) 2009-2015 Maximus5
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -53,6 +53,7 @@ CRgnDetect::CRgnDetect()
 {
 	mb_SelfBuffers = FALSE;
 	mn_DetectCallCount = 0;
+	mn_AllFlagsSaved = 0;
 	memset(&m_DetectedDialogs, 0, sizeof(m_DetectedDialogs));
 	mp_FarInfo = NULL;
 	// Флаги

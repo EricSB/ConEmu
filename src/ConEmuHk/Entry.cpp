@@ -85,9 +85,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "Injects.h"
 #include "Ansi.h"
 #include "DefTermHk.h"
+#include "MainThread.h"
 #include "../ConEmu/version.h"
 #include "../common/CmdLine.h"
 #include "../common/ConsoleAnnotation.h"
+#include "../common/HkFunc.h"
 #include "../common/RConStartArgs.h"
 #include "../common/WConsole.h"
 #include "../common/WObjects.h"
@@ -158,7 +160,6 @@ struct CpConv gCpConv = {};
 
 #define isPressed(inp) ((GetKeyState(inp) & 0x8000) == 0x8000)
 
-extern DWORD  gnHookMainThreadId;
 extern HANDLE ghHeap;
 //extern HMODULE ghKernel32, ghUser32, ghShell32, ghAdvapi32, ghComdlg32;
 extern HMODULE ghUser32;
@@ -178,11 +179,10 @@ BOOL gbDllStopCalled = FALSE;
 BOOL gbHooksWasSet = false;
 BOOL gbDllDeinitialized = false;
 
-extern BOOL StartupHooks(HMODULE ahOurDll);
+extern BOOL StartupHooks();
 extern void ShutdownHooks();
 extern void InitializeHookedModules();
 extern void FinalizeHookedModules();
-extern DWORD GetMainThreadId(bool bUseCurrentAsMain);
 extern MMap<DWORD,BOOL> gStartedThreads;
 extern HRESULT OurShellExecCmdLine(HWND hwnd, LPCWSTR pwszCommand, LPCWSTR pwszStartDir, bool bRunAsAdmin, bool bForce);
 //HMODULE ghPsApi = NULL;
@@ -212,6 +212,7 @@ BOOL    gbNonGuiMode = FALSE;
 DWORD   gnImageSubsystem = 0;
 DWORD   gnImageBits = WIN3264TEST(32,64); //-V112
 wchar_t gsInitConTitle[512] = {};
+BOOL    gbTrueColorServerRequested = FALSE;
 
 struct ProcessEventFlags {
 	HANDLE hProcessFlag; // = OpenEvent(SYNCHRONIZE|EVENT_MODIFY_STATE, FALSE, szEvtName);
@@ -437,7 +438,7 @@ CESERVER_CONSOLE_MAPPING_HDR* GetConMap(BOOL abForceRecreate/*=FALSE*/)
 			gpAppMap = new MFileMapping<CESERVER_CONSOLE_APP_MAPPING>;
 		if (gpAppMap)
 		{
-			gpAppMap->InitName(CECONAPPMAPNAME, (DWORD)ghConWnd); //-V205
+			gpAppMap->InitName(CECONAPPMAPNAME, LODWORD(ghConWnd)); //-V205
 			gpAppMap->Open(TRUE);
 		}
 	}
@@ -451,7 +452,7 @@ CESERVER_CONSOLE_MAPPING_HDR* GetConMap(BOOL abForceRecreate/*=FALSE*/)
 			gpConInfo = NULL;
 			goto wrap;
 		}
-		gpConMap->InitName(CECONMAPNAME, (DWORD)ghConWnd); //-V205
+		gpConMap->InitName(CECONMAPNAME, LODWORD(ghConWnd)); //-V205
 	}
 
 	if (!gpConInfo || abForceRecreate)
@@ -645,9 +646,9 @@ DWORD WINAPI DummyLibLoaderCmdThread(LPVOID /*apParm*/)
 #endif
 
 static long gnFixSshThreadsResumeOk = 0;
+struct ThInfoStr { DWORD_PTR nTID; HANDLE hThread; };
 void FixSshThreads(int iStep)
 {
-	struct ThInfoStr { DWORD_PTR nTID; HANDLE hThread; };
 	static MArray<ThInfoStr> *pThInfo = NULL;
 
 	#ifdef _DEBUG
@@ -758,7 +759,7 @@ DWORD WINAPI DllStart(LPVOID /*apParm*/)
 {
 	//DLOG0("DllStart",0);
 	#if defined(SHOW_EXE_TIMINGS) || defined(SHOW_EXE_MSGBOX)
-		wchar_t szTimingMsg[512]; UNREFERENCED_PARAMETER(szTimingMsg);
+		wchar_t szTimingMsg[512]; UNREFERENCED_PARAMETER(szTimingMsg[0]);
 		HANDLE hTimingHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 	#endif
 
@@ -876,7 +877,7 @@ DWORD WINAPI DllStart(LPVOID /*apParm*/)
 	{
 		// We can get here, if *.vshost.exe was started 'normally'
 		// and Win+G (attach) was initiated from ConEmu by user
-		_ASSERTE(ghConWnd == GetConsoleWindow());
+		_ASSERTE(ghConWnd == GetRealConsoleWindow());
 		gnImageSubsystem = IMAGE_SUBSYSTEM_WINDOWS_CUI;
 	}
 	// Проверка чего получилось
@@ -962,7 +963,7 @@ DWORD WINAPI DllStart(LPVOID /*apParm*/)
 					GetStdHandle(STD_INPUT_HANDLE), GetStdHandle(STD_OUTPUT_HANDLE), GetStdHandle(STD_ERROR_HANDLE));
 				if (pIn)
 				{
-					//HWND hConWnd = GetConsoleWindow();
+					//HWND hConWnd = GetRealConsoleWindow();
 					CESERVER_REQ* pOut = ExecuteGuiCmd(ghConWnd, pIn, ghConWnd);
 					ExecuteFreeResult(pIn);
 					if (pOut) ExecuteFreeResult(pOut);
@@ -1079,7 +1080,7 @@ DWORD WINAPI DllStart(LPVOID /*apParm*/)
 	// gbPrepareDefaultTerminal turned on in DllMain
 	if (gbPrepareDefaultTerminal)
 	{
-		if (!InitDefaultTerm())
+		if (!InitDefTerm())
 		{
 			TODO("Show error message?");
 		}
@@ -1115,7 +1116,7 @@ DWORD WINAPI DllStart(LPVOID /*apParm*/)
 
 		DLOG0("StartupHooks",0);
 		print_timings(L"StartupHooks");
-		gbHooksWasSet = StartupHooks(ghOurModule);
+		gbHooksWasSet = StartupHooks();
 		print_timings(L"StartupHooks - done");
 		DLOGEND();
 
@@ -1228,7 +1229,7 @@ void InitExeName()
 	}
 
 	#if defined(SHOW_EXE_TIMINGS) || defined(SHOW_EXE_MSGBOX)
-		wchar_t szTimingMsg[512]; UNREFERENCED_PARAMETER(szTimingMsg);
+		wchar_t szTimingMsg[512]; UNREFERENCED_PARAMETER(szTimingMsg[0]);
 		HANDLE hTimingHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 		if (!lstrcmpi(pszName, SHOW_EXE_MSGBOX_NAME))
 		{
@@ -1468,7 +1469,7 @@ void DoDllStop(bool bFinal, bool bFromTerminate)
 	DLOG0("DoDllStop",bFinal);
 
 	#if defined(SHOW_EXE_TIMINGS) || defined(SHOW_EXE_MSGBOX)
-		wchar_t szTimingMsg[512]; UNREFERENCED_PARAMETER(szTimingMsg);
+		wchar_t szTimingMsg[512]; UNREFERENCED_PARAMETER(szTimingMsg[0]);
 		HANDLE hTimingHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 	#endif
 
@@ -1688,6 +1689,9 @@ BOOL DllMain_ProcessAttach(HANDLE hModule, DWORD  ul_reason_for_call)
 	BOOL lbAllow = TRUE;
 	DLOG0("DllMain.DLL_PROCESS_ATTACH",ul_reason_for_call);
 
+	ghOurModule = (HMODULE)hModule;
+	ghWorkingModule = (u64)hModule;
+
 	#ifdef USEHOOKLOG
 	QueryPerformanceFrequency(&HookLogger::g_freq);
 	#endif
@@ -1697,6 +1701,8 @@ BOOL DllMain_ProcessAttach(HANDLE hModule, DWORD  ul_reason_for_call)
 	HANDLE hProcHeap = GetProcessHeap();
 	#endif
 	HeapInitialize();
+
+	hkFunc.SetInternalMode((HMODULE)hModule, (FARPROC)GetTrampoline);
 
 	DLOG1("DllMain.LoadStartupEnv",ul_reason_for_call);
 	/* *** DEBUG PURPOSES */
@@ -1713,13 +1719,10 @@ BOOL DllMain_ProcessAttach(HANDLE hModule, DWORD  ul_reason_for_call)
 	/* *** DEBUG PURPOSES */
 
 	DLOG1_("DllMain.Console",ul_reason_for_call);
-	ghOurModule = (HMODULE)hModule;
-	ghConWnd = GetConsoleWindow();
+	ghConWnd = GetRealConsoleWindow();
 	if (ghConWnd)
 		GetConsoleTitle(gsInitConTitle, countof(gsInitConTitle));
 	gnSelfPID = GetCurrentProcessId();
-	ghWorkingModule = (u64)hModule;
-	gfGetRealConsoleWindow = GetConsoleWindow;
 	DLOGEND1();
 
 
@@ -2443,7 +2446,7 @@ int DuplicateRoot(CESERVER_REQ_DUPLICATE* Duplicate)
 							si.dwFlags = STARTF_USESHOWWINDOW;
 							PROCESS_INFORMATION pi = {};
 							DWORD nCreateFlags = NORMAL_PRIORITY_CLASS|CREATE_NEW_CONSOLE;
-							if (CreateProcess(NULL, szSrvCmd, NULL, NULL, FALSE, nCreateFlags, NULL, NULL, &si, &pi))
+							if (hkFunc.createProcess(NULL, szSrvCmd, NULL, NULL, FALSE, nCreateFlags, NULL, NULL, &si, &pi))
 							{
 								CloseHandle(pi.hProcess);
 								CloseHandle(pi.hThread);
@@ -2551,7 +2554,7 @@ int DuplicateRoot(CESERVER_REQ_DUPLICATE* Duplicate)
 	}
 	else
 	{
-		BOOL bRunRc = CreateProcess(NULL, pszCmd, NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi);
+		BOOL bRunRc = hkFunc.createProcess(NULL, pszCmd, NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi);
 		iRc = bRunRc ? 0 : GetLastError();
 		goto wrap;
 	}
@@ -2568,12 +2571,10 @@ wrap:
 // можно дергать эту экспортируемую функцию
 HWND WINAPI GetRealConsoleWindow()
 {
-	_ASSERTE(gfGetRealConsoleWindow);
-	HWND hConWnd = gfGetRealConsoleWindow ? gfGetRealConsoleWindow() : NULL; //GetConsoleWindow();
-#ifdef _DEBUG
-	wchar_t sClass[64]; GetClassName(hConWnd, sClass, countof(sClass));
-	_ASSERTEX(hConWnd==NULL || isConsoleClass(sClass));
-#endif
+	HWND hConWnd = myGetConsoleWindow();
+
+	_ASSERTEX(hConWnd==NULL || isConsoleWindow(hConWnd));
+
 	return hConWnd;
 }
 
@@ -2610,7 +2611,7 @@ BOOL WINAPI HookServerCommand(LPVOID pInst, CESERVER_REQ* pCmd, CESERVER_REQ* &p
 			pcbReplySize = sizeof(CESERVER_REQ_HDR)+sizeof(DWORD);
 			lbRc = ExecuteNewCmd(ppReply, pcbMaxReplySize, pCmd->hdr.nCmd, pcbReplySize);
 			if (lbRc)
-				ppReply->dwData[0] = (DWORD)ghAttachGuiClient;
+				ppReply->dwData[0] = LODWORD(ghAttachGuiClient);
 		} // CECMD_ATTACHGUIAPP
 		break;
 	case CECMD_SETFOCUS:
@@ -2743,7 +2744,7 @@ BOOL WINAPI HookServerCommand(LPVOID pInst, CESERVER_REQ* pCmd, CESERVER_REQ* &p
 					si.wShowWindow = SW_SHOWNORMAL;
 				}
 
-				lbRc = CreateProcess(NULL, szCmdLine, NULL, NULL, FALSE, NORMAL_PRIORITY_CLASS, NULL, NULL, &si, &pi);
+				lbRc = hkFunc.createProcess(NULL, szCmdLine, NULL, NULL, FALSE, NORMAL_PRIORITY_CLASS, NULL, NULL, &si, &pi);
 				if (lbRc)
 				{
 					CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
@@ -2958,6 +2959,9 @@ int WINAPI RequestLocalServer(/*[IN/OUT]*/RequestLocalServerParm* Parm)
 		goto wrap;
 
 	_ASSERTE(CheckCallbackPtr(ghSrvDll, 1, (FARPROC*)&gfRequestLocalServer, TRUE));
+
+	if (Parm->Flags & slsf_RequestTrueColor)
+		gbTrueColorServerRequested = TRUE;
 
 	//iRc = gfRequestLocalServer(&gpAnnotationHeader, &ghCurrentOutBuffer);
 	iRc = gfRequestLocalServer(Parm);

@@ -1,6 +1,6 @@
 ﻿
 /*
-Copyright (c) 2009-2014 Maximus5
+Copyright (c) 2009-2015 Maximus5
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -33,6 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "Monitors.h"
 #include "WConsole.h"
 #include "WObjects.h"
+#include "HkFunc.h"
 
 #ifndef CONEMU_MINIMAL
 #include "WUser.h"
@@ -89,6 +90,8 @@ const UINT gnConsoleSectionSize = sizeof(CONSOLE_INFO)+1024;
 
 //#pragma pack(pop)
 #include <poppack.h>
+
+MY_CONSOLE_FONT_INFOEX g_LastSetConsoleFont = {};
 
 #ifndef CONEMU_MINIMAL
 void WINAPI ShutdownConsole()
@@ -238,152 +241,6 @@ BOOL SetConsoleInfo(HWND hwndConsole, CONSOLE_INFO *pci)
 }
 #endif
 
-
-#ifndef CONEMU_MINIMAL
-void ChangeScreenBufferSize(CONSOLE_SCREEN_BUFFER_INFO& sbi, SHORT VisibleX, SHORT VisibleY, SHORT BufferX, SHORT BufferY)
-{
-	_ASSERTE(BufferX>=VisibleX && VisibleX && BufferY>=VisibleY && VisibleY);
-	sbi.dwSize.X = BufferX;
-	sbi.dwSize.Y = BufferY;
-	sbi.srWindow.Right = min(BufferX,(sbi.srWindow.Left+VisibleX))-1;
-	sbi.srWindow.Left = max(0,(sbi.srWindow.Right+1-VisibleX));
-	sbi.srWindow.Bottom = min(BufferY,(sbi.srWindow.Top+VisibleY))-1;
-	sbi.srWindow.Top = max(0,(sbi.srWindow.Bottom+1-VisibleY));
-}
-
-// sbi - откуда брать данные
-// nCurWidth, nCurHeight - текущие (запомненные) высота и ширина рабочей области
-// nCurScroll - текущие (запомненные) флаги
-// pnNewWidth, pnNewHeight - результат
-// pnScroll - флаги из RealBufferScroll
-BOOL GetConWindowSize(const CONSOLE_SCREEN_BUFFER_INFO& sbi, int nCurWidth, int nCurHeight, DWORD nCurScroll, int* pnNewWidth, int* pnNewHeight, DWORD* pnScroll)
-{
-	DWORD nScroll = rbs_None; // enum RealBufferScroll
-	int nNewWidth = 0, nNewHeight = 0;
-	
-	// Функция возвращает размер ОКНА (видимой области), то есть буфер может быть больше
-	
-	if (sbi.dwSize.X == nCurWidth)
-	{
-		nNewWidth = sbi.dwSize.X;
-	}
-	else
-	{
-		if (((nCurScroll & rbs_Horz) && (sbi.dwSize.X > nCurWidth))
-			|| (sbi.dwSize.X > EvalBufferTurnOnSize(nCurWidth)))
-		{
-			nNewWidth = sbi.srWindow.Right - sbi.srWindow.Left + 1;
-			_ASSERTE(nNewWidth <= sbi.dwSize.X);
-		}
-		else
-		{
-			nNewWidth = sbi.dwSize.X;
-		}
-	}
-	// Флаги
-	if (/*(sbi.dwSize.X > sbi.dwMaximumWindowSize.X) ||*/ (nNewWidth < sbi.dwSize.X))
-	{
-		// для проверки условий
-		//_ASSERTE((sbi.dwSize.X > sbi.dwMaximumWindowSize.X) && (nNewWidth < sbi.dwSize.X));
-		nScroll |= rbs_Horz;
-	}
-
-
-	if (sbi.dwSize.Y == nCurHeight)
-	{
-		nNewHeight = sbi.dwSize.Y;
-	}
-	else
-	{
-		if (((nCurScroll & rbs_Vert) && (sbi.dwSize.Y > nCurHeight))
-			|| (sbi.dwSize.Y > EvalBufferTurnOnSize(nCurHeight)))
-		{
-			nNewHeight = sbi.srWindow.Bottom - sbi.srWindow.Top + 1;
-		}
-		else
-		{
-			nNewHeight = sbi.dwSize.Y;
-		}
-	}
-	// Флаги
-	if (/*(sbi.dwSize.Y > sbi.dwMaximumWindowSize.Y) ||*/ (nNewHeight < sbi.dwSize.Y))
-	{
-		// для проверки условий
-		//_ASSERTE((sbi.dwSize.Y >= sbi.dwMaximumWindowSize.Y) && (nNewHeight < sbi.dwSize.Y));
-		nScroll |= rbs_Vert;
-	}
-
-	// Validation
-	if ((nNewWidth <= 0) || (nNewHeight <= 0))
-	{
-		_ASSERTE(nNewWidth>0 && nNewHeight>0);
-		return FALSE;
-	}
-	
-	// Result
-	if (pnNewWidth)
-		*pnNewWidth = nNewWidth;
-	if (pnNewHeight)
-		*pnNewHeight = nNewHeight;
-	if (pnScroll)
-		*pnScroll = nScroll;
-	
-	return TRUE;
-	
-	//BOOL lbBufferHeight = this->isScroll();
-
-	//// Проверка режимов прокрутки
-	//if (!lbBufferHeight)
-	//{
-	//	if (sbi.dwSize.Y > sbi.dwMaximumWindowSize.Y)
-	//	{
-	//		lbBufferHeight = TRUE; // однозначное включение прокрутки
-	//	}
-	//}
-
-	//if (lbBufferHeight)
-	//{
-	//	if (sbi.srWindow.Top == 0
-	//	        && sbi.dwSize.Y == (sbi.srWindow.Bottom + 1)
-	//	  )
-	//	{
-	//		lbBufferHeight = FALSE; // однозначное вЫключение прокрутки
-	//	}
-	//}
-
-	//// Теперь собственно размеры
-	//if (!lbBufferHeight)
-	//{
-	//	nNewHeight =  sbi.dwSize.Y;
-	//}
-	//else
-	//{
-	//	// Это может прийти во время смены размера
-	//	if ((sbi.srWindow.Bottom - sbi.srWindow.Top + 1) < MIN_CON_HEIGHT)
-	//		nNewHeight = con.nTextHeight;
-	//	else
-	//		nNewHeight = sbi.srWindow.Bottom - sbi.srWindow.Top + 1;
-	//}
-
-	//WARNING("Здесь нужно выполнить коррекцию, если nNewHeight велико - включить режим BufferHeight");
-
-	//if (pbBufferHeight)
-	//	*pbBufferHeight = lbBufferHeight;
-
-	//_ASSERTE(nNewWidth>=MIN_CON_WIDTH && nNewHeight>=MIN_CON_HEIGHT);
-
-	//if (!nNewWidth || !nNewHeight)
-	//{
-	//	Assert(nNewWidth && nNewHeight);
-	//	return FALSE;
-	//}
-
-	////if (nNewWidth < sbi.dwSize.X)
-	////    nNewWidth = sbi.dwSize.X;
-	//return TRUE;
-}
-#endif
-
 #ifndef CONEMU_MINIMAL
 //
 //	Fill the CONSOLE_INFO structure with information
@@ -422,28 +279,6 @@ void GetConsoleSizeInfo(CONSOLE_INFO *pci)
 #endif
 
 
-#if defined(__GNUC__)
-#define __in
-#define __out
-#undef ENABLE_AUTO_POSITION
-#endif
-
-#if !defined(__MINGW64_VERSION_MAJOR)
-
-//VISTA support:
-#ifndef ENABLE_AUTO_POSITION
-typedef struct _CONSOLE_FONT_INFOEX
-{
-	ULONG cbSize;
-	DWORD nFont;
-	COORD dwFontSize;
-	UINT FontFamily;
-	UINT FontWeight;
-	WCHAR FaceName[LF_FACESIZE];
-} CONSOLE_FONT_INFOEX, *PCONSOLE_FONT_INFOEX;
-#endif
-
-#endif
 
 // Vista+ only
 BOOL apiGetConsoleScreenBufferInfoEx(HANDLE hConsoleOutput, MY_CONSOLE_SCREEN_BUFFER_INFOEX* lpConsoleScreenBufferInfoEx)
@@ -502,6 +337,9 @@ BOOL apiSetConsoleScreenBufferInfoEx(HANDLE hConsoleOutput, MY_CONSOLE_SCREEN_BU
 	return lbRc;
 }
 
+typedef BOOL (WINAPI *PSetCurrentConsoleFontEx)(HANDLE /*hConsoleOutput*/, BOOL /*bMaximumWindow*/, MY_CONSOLE_FONT_INFOEX* /*lpConsoleCurrentFontEx*/);
+typedef BOOL (WINAPI *PGetCurrentConsoleFontEx)(HANDLE /*hConsoleOutput*/, BOOL /*bMaximumWindow*/, MY_CONSOLE_FONT_INFOEX* /*lpConsoleCurrentFontEx*/);
+
 // Vista+ only
 BOOL apiGetConsoleFontSize(HANDLE hOutput, int &SizeY, int &SizeX, wchar_t (&rsFontName)[LF_FACESIZE])
 {
@@ -515,13 +353,13 @@ BOOL apiGetConsoleFontSize(HANDLE hOutput, int &SizeY, int &SizeX, wchar_t (&rsF
 
 	BOOL lbRc = FALSE;
 
-	typedef BOOL (WINAPI *PGetCurrentConsoleFontEx)(HANDLE /*hConsoleOutput*/, BOOL /*bMaximumWindow*/, PCONSOLE_FONT_INFOEX /*lpConsoleCurrentFontEx*/);
+	//typedef BOOL (WINAPI *PGetCurrentConsoleFontEx)(HANDLE /*hConsoleOutput*/, BOOL /*bMaximumWindow*/, MY_CONSOLE_FONT_INFOEX* /*lpConsoleCurrentFontEx*/);
 	PGetCurrentConsoleFontEx GetCurrentConsoleFontEx = (PGetCurrentConsoleFontEx)
 	        GetProcAddress(hKernel, "GetCurrentConsoleFontEx");
 
 	if (GetCurrentConsoleFontEx)  // We have Vista
 	{
-		CONSOLE_FONT_INFOEX cfi = {sizeof(cfi)};
+		MY_CONSOLE_FONT_INFOEX cfi = {sizeof(cfi)};
 		lbRc = GetCurrentConsoleFontEx(GetStdHandle(STD_OUTPUT_HANDLE), FALSE, &cfi);
 		if (lbRc)
 		{
@@ -547,18 +385,42 @@ BOOL apiSetConsoleFontSize(HANDLE hOutput, int inSizeY, int inSizeX, const wchar
 
 	BOOL lbRc = FALSE;
 
-	typedef BOOL (WINAPI *PSetCurrentConsoleFontEx)(HANDLE /*hConsoleOutput*/, BOOL /*bMaximumWindow*/, PCONSOLE_FONT_INFOEX /*lpConsoleCurrentFontEx*/);
+	//typedef BOOL (WINAPI *PSetCurrentConsoleFontEx)(HANDLE /*hConsoleOutput*/, BOOL /*bMaximumWindow*/, MY_CONSOLE_FONT_INFOEX* /*lpConsoleCurrentFontEx*/);
 	PSetCurrentConsoleFontEx SetCurrentConsoleFontEx = (PSetCurrentConsoleFontEx)
 	        GetProcAddress(hKernel, "SetCurrentConsoleFontEx");
 
+	//typedef BOOL (WINAPI *PGetCurrentConsoleFontEx)(HANDLE /*hConsoleOutput*/, BOOL /*bMaximumWindow*/, MY_CONSOLE_FONT_INFOEX* /*lpConsoleCurrentFontEx*/);
+	PGetCurrentConsoleFontEx GetCurrentConsoleFontEx = (PGetCurrentConsoleFontEx)
+	        GetProcAddress(hKernel, "GetCurrentConsoleFontEx");
+
 	if (SetCurrentConsoleFontEx)  // We have Vista
 	{
-		CONSOLE_FONT_INFOEX cfi = {sizeof(cfi)};
+		MY_CONSOLE_FONT_INFOEX cfi = {sizeof(cfi)};
 		//GetCurrentConsoleFontEx(GetStdHandle(STD_OUTPUT_HANDLE), FALSE, &cfi);
 		cfi.dwFontSize.X = inSizeX;
 		cfi.dwFontSize.Y = inSizeY;
 		lstrcpynW(cfi.FaceName, asFontName ? asFontName : L"Lucida Console", countof(cfi.FaceName));
-		lbRc = SetCurrentConsoleFontEx(GetStdHandle(STD_OUTPUT_HANDLE), FALSE, &cfi);
+
+		HANDLE hConOut = GetStdHandle(STD_OUTPUT_HANDLE);
+		lbRc = SetCurrentConsoleFontEx(hConOut, FALSE, &cfi);
+
+		// Store for further comparison
+		if (lbRc)
+		{
+			MY_CONSOLE_FONT_INFOEX cfiSet = {sizeof(cfiSet)};
+			if (GetCurrentConsoleFontEx && GetCurrentConsoleFontEx(hConOut, FALSE, &cfiSet))
+			{
+				// Win10 can't set "Lucida Console 3x5" and we get "4x6"
+				_ASSERTE(_abs(cfiSet.dwFontSize.X-cfi.dwFontSize.X)<=1 && _abs(cfiSet.dwFontSize.Y-cfi.dwFontSize.Y)<=1);
+				g_LastSetConsoleFont = cfiSet;
+			}
+			else
+			{
+				DEBUGTEST(DWORD dwErr = GetLastError());
+				_ASSERTE(FALSE && "apiGetConsoleScreenBufferInfoEx failed");
+				g_LastSetConsoleFont = cfi;
+			}
+		}
 	}
 
 	return lbRc;
@@ -787,22 +649,30 @@ void SetConsoleBufferSize(HWND inConWnd, int anWidth, int anHeight, int anBuffer
 
 COORD MyGetLargestConsoleWindowSize(HANDLE hConsoleOutput)
 {
-	// В Wine не работает
-	COORD crMax = GetLargestConsoleWindowSize(hConsoleOutput);
+	// Fails in Wine
+	COORD crMax = hkFunc.getLargestConsoleWindowSize(hConsoleOutput);
 	DWORD dwErr = (crMax.X && crMax.Y) ? 0 : GetLastError();
 	UNREFERENCED_PARAMETER(dwErr);
+
 	// Wine BUG
 	//if (!crMax.X || !crMax.Y)
 	if ((crMax.X == 80 && crMax.Y == 24) && IsWine())
 	{
-		crMax.X = 255;
-		crMax.Y = 255;
+		crMax.X = 999;
+		crMax.Y = 999;
 	}
+	#ifdef _DEBUG
 	else if (IsWin10())
 	{
-		// Windows 10 Preview has a new bug in GetLargestConsoleWindowSize
-		crMax.X = max(crMax.X,555);
-		crMax.Y = max(crMax.Y,555);
+		CONSOLE_SCREEN_BUFFER_INFO csbi = {};
+		GetConsoleScreenBufferInfo(hConsoleOutput, &csbi);
+
+		// Windows 10 Preview had a new bug in GetLargestConsoleWindowSize
+		_ASSERTE((crMax.X > (csbi.srWindow.Right-csbi.srWindow.Left+1)) && (crMax.Y > (csbi.srWindow.Bottom-csbi.srWindow.Top+1)));
+		//crMax.X = max(crMax.X,555);
+		//crMax.Y = max(crMax.Y,555);
 	}
+	#endif
+
 	return crMax;
 }

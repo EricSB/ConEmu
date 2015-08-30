@@ -440,6 +440,28 @@ int CDragDropData::RetrieveDragFromInfo(BOOL abClickNeed, COORD crMouseDC, wchar
 BOOL CDragDropData::AddFmt_FileNameW(wchar_t* pszDraggedPath, UINT nFilesCount, int cbSize)
 {
 	HRESULT hr = mp_DataObject->SetDataInt(CFSTR_FILENAMEW/*L"FileNameW"*/, pszDraggedPath, cbSize);
+
+	// The following was a try to deal with PngOptimizer of different bitness,
+	// but it failed and didn't help.
+	#if 0
+	// For compatibility reasons lets add ANSI versions too
+	// It will be better to parse all paths and convert them to short names, but...
+	if (cbSize > 0)
+	{
+		int nAnsiSize = (int)(cbSize / sizeof(wchar_t));
+		_ASSERTE(cbSize == (sizeof(wchar_t) * nAnsiSize));
+		char* pszAnsi = new char[nAnsiSize];
+		if (pszAnsi)
+		{
+			if (WideCharToMultiByte(CP_ACP, 0, pszDraggedPath, cbSize, pszAnsi, nAnsiSize, NULL, NULL) > 0)
+			{
+				hr = mp_DataObject->SetDataInt(CFSTR_FILENAMEA/*L"FileName"*/, pszAnsi, nAnsiSize);
+			}
+			delete[] pszAnsi;
+		}
+	}
+	#endif
+
 	return SUCCEEDED(hr);
 }
 
@@ -1299,6 +1321,7 @@ void CDragDropData::SetDragToInfo(const ForwardedPanelInfo* pInfo, size_t cbInfo
 		if (!m_pfpi)
 		{
 			mn_PfpiSizeMax = sizeof(ForwardedPanelInfo)+(MAX_PATH*5*sizeof(wchar_t));
+			SafeFree(m_pfpi);
 			m_pfpi = (ForwardedPanelInfo*)calloc(1,mn_PfpiSizeMax);
 		}
 
@@ -1336,6 +1359,7 @@ void CDragDropData::SetDragToInfo(const ForwardedPanelInfo* pInfo, size_t cbInfo
 
 	// Reserve additional space
 	mn_PfpiSizeMax = cbInfoSize+(MAX_PATH*5*sizeof(wchar_t));
+	SafeFree(m_pfpi);
 	m_pfpi = (ForwardedPanelInfo*)calloc(1, mn_PfpiSizeMax);
 	if (!m_pfpi)
 	{
@@ -1834,6 +1858,7 @@ BOOL CDragDropData::PaintDragImageBits(wchar_t* pszFiles, HDC& hDrawDC, HBITMAP&
 
 		ptCursor->y = 17; // под первой строкой
 	}
+	DeleteObject(hf);
 	return TRUE;
 }
 

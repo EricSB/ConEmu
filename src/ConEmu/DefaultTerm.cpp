@@ -218,6 +218,7 @@ void CDefaultTerminal::ReloadSettings()
 	m_Opt.bAgressive = gpSet->isRegisterAgressive;
 	m_Opt.bNoInjects = gpSet->isDefaultTerminalNoInjects;
 	m_Opt.bNewWindow = gpSet->isDefaultTerminalNewWindow;
+	m_Opt.bDebugLog  = gpSet->isDefaultTerminalDebugLog;
 	m_Opt.nDefaultTerminalConfirmClose = gpSet->nDefaultTerminalConfirmClose;
 
 	ConEmuGuiMapping GuiInfo = {};
@@ -272,4 +273,9 @@ bool CDefaultTerminal::NotifyHookingStatus(DWORD nPID, LPCWSTR sName)
 	gpConEmu->mp_Status->SetStatus(szInfo);
 	// descendant must return true if status bar was changed
 	return true;
+}
+
+void CDefaultTerminal::LogHookingStatus(LPCWSTR sMessage)
+{
+	gpConEmu->LogString(sMessage);
 }

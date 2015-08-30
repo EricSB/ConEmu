@@ -1,6 +1,6 @@
 ﻿
 /*
-Copyright (c) 2009-2014 Maximus5
+Copyright (c) 2009-2015 Maximus5
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -42,6 +42,7 @@ CmdArg::CmdArg()
 CmdArg::CmdArg(wchar_t* RVAL_REF asPtr)
 {
 	mn_MaxLen = 0; ms_Arg = NULL;
+	mpsz_Dequoted = NULL;
 	mb_RestoreEnvVar = false;
 	ms_RestoreVarName[0] = 0;
 	AttachInt(asPtr);

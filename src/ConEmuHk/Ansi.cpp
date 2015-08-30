@@ -63,18 +63,15 @@ DWORD AnsiTlsIndex = 0;
 
 /* ************ Globals ************ */
 extern HMODULE ghOurModule; // Хэндл нашей dll'ки (здесь хуки не ставятся)
-extern DWORD   gnHookMainThreadId;
-extern BOOL    gbHooksTemporaryDisabled;
+#include "MainThread.h"
 
 /* ************ Globals for SetHook ************ */
 extern HWND    ghConWnd;      // RealConsole
 extern HWND    ghConEmuWnd;   // Root! ConEmu window
 extern HWND    ghConEmuWndDC; // ConEmu DC window
 extern DWORD   gnGuiPID;
-extern GetConsoleWindow_T gfGetRealConsoleWindow;
-//extern HWND WINAPI GetRealConsoleWindow(); // Entry.cpp
-extern HANDLE ghCurrentOutBuffer;
-extern HANDLE ghStdOutHandle;
+extern HANDLE  ghCurrentOutBuffer;
+extern HANDLE  ghStdOutHandle;
 extern wchar_t gsInitConTitle[512];
 /* ************ Globals for SetHook ************ */
 
@@ -107,6 +104,7 @@ bool CEAnsi::gbWasXTermOutput = false;
 
 /* ************ Export ANSI printings ************ */
 LONG gnWriteProcessed = 0;
+FARPROC CallWriteConsoleW = NULL;
 BOOL WINAPI WriteProcessed(LPCWSTR lpBuffer, DWORD nNumberOfCharsToWrite, LPDWORD lpNumberOfCharsWritten)
 {
 	HANDLE hConsoleOutput = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -762,7 +760,7 @@ HANDLE WINAPI CEAnsi::OnCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, D
 	h = F(CreateFileW)(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
 	DWORD nLastErr = GetLastError();
 
-	DebugString(L"CEAnsi::OnCreateFileW executed");
+	DebugString(L"CEAnsi::OnCreateFileW executed\n");
 
 	// Just a check for "string" validity
 	if (lpFileName && (((DWORD_PTR)lpFileName) & ~0xFFFF)
@@ -776,7 +774,7 @@ HANDLE WINAPI CEAnsi::OnCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, D
 		{
 			ghLastConOut = h;
 		}
-		DebugString(L"CEAnsi::OnCreateFileW checked");
+		DebugString(L"CEAnsi::OnCreateFileW checked\n");
 	}
 
 	SetLastError(nLastErr);
@@ -789,7 +787,7 @@ BOOL WINAPI CEAnsi::OnWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfB
 	ORIGINALFAST(WriteFile);
 	//BOOL bMainThread = FALSE; // поток не важен
 	BOOL lbRc = FALSE;
-	DWORD nDBCSCP = 0;
+	//DWORD nDBCSCP = 0;
 
 	FIRST_ANSI_CALL((const BYTE*)lpBuffer, nNumberOfBytesToWrite);
 
@@ -944,6 +942,8 @@ BOOL CEAnsi::WriteText(OnWriteConsoleW_t _WriteConsoleW, HANDLE hConsoleOutput, 
 {
 	BOOL lbRc = FALSE;
 	DWORD /*nWritten = 0,*/ nTotalWritten = 0;
+
+	_ASSERTE(_WriteConsoleW != &WriteConsoleW && "It must point to CallPointer for 'unhooked' call");
 
 	ExtWriteTextParm write = {sizeof(write), ewtf_Current, hConsoleOutput};
 	write.Private = (void*)(FARPROC)_WriteConsoleW;

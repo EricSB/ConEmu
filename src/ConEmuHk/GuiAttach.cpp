@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <windows.h>
 #include "GuiAttach.h"
+#include "MainThread.h"
 #include "../common/common.hpp"
 #include "../common/CmdLine.h"
 #include "../common/ConEmuCheck.h"
@@ -43,7 +44,6 @@ extern HMODULE ghOurModule;
 extern HWND    ghConEmuWnd;     // Root! ConEmu window
 extern HWND    ghConEmuWndDC;   // ConEmu DC window
 extern HWND    ghConEmuWndBack; // ConEmu Back window - holder for GUI client
-extern DWORD   gnHookMainThreadId;
 extern DWORD   gnServerPID;
 
 // Этот TID может отличаться от основного потока.
@@ -633,7 +633,7 @@ void OnGuiWindowAttached(HWND hWindow, HMENU hMenu, LPCSTR asClassA, LPCWSTR asC
 	pIn->AttachGuiApp.hkl = (DWORD)(LONG)(LONG_PTR)GetKeyboardLayout(0);
 
 	wchar_t szGuiPipeName[128];
-	msprintf(szGuiPipeName, countof(szGuiPipeName), CEGUIPIPENAME, L".", (DWORD)ghConEmuWnd);
+	msprintf(szGuiPipeName, countof(szGuiPipeName), CEGUIPIPENAME, L".", LODWORD(ghConEmuWnd));
 
 
 	// AttachThreadInput
@@ -825,7 +825,7 @@ void OnShowGuiClientWindow(HWND hWnd, int &nCmdShow, BOOL &rbGuiAttach, BOOL &rb
 			GetModuleFileName(NULL, pIn->AttachGuiApp.sAppFilePathName, countof(pIn->AttachGuiApp.sAppFilePathName));
 
 			wchar_t szGuiPipeName[128];
-			msprintf(szGuiPipeName, countof(szGuiPipeName), CEGUIPIPENAME, L".", (DWORD)ghConEmuWnd);
+			msprintf(szGuiPipeName, countof(szGuiPipeName), CEGUIPIPENAME, L".", LODWORD(ghConEmuWnd));
 
 			CESERVER_REQ* pOut = ExecuteCmd(szGuiPipeName, pIn, 0/*Default timeout*/, NULL);
 			ExecuteFreeResult(pIn);
@@ -889,7 +889,7 @@ void CorrectGuiChildRect(DWORD anStyle, DWORD anStyleEx, RECT& rcGui)
 			lstrcpyn(pIn->GuiAppShifts.szExeName, PointToName(szOurExe), countof(pIn->GuiAppShifts.szExeName));
 
 			wchar_t szGuiPipeName[128];
-			msprintf(szGuiPipeName, countof(szGuiPipeName), CEGUIPIPENAME, L".", (DWORD)ghConEmuWnd);
+			msprintf(szGuiPipeName, countof(szGuiPipeName), CEGUIPIPENAME, L".", LODWORD(ghConEmuWnd));
 
 			CESERVER_REQ* pOut = ExecuteCmd(szGuiPipeName, pIn, 10000, NULL);
 			if (pOut)

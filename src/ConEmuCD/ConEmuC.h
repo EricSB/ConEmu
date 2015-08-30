@@ -45,7 +45,6 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //  #define SHOW_STARTED_MSGBOX
 #define PRINT_COMSPEC(f,a) //wprintf(f,a)
 //#define DEBUGSTR(s)
-#define CRTPRINTF
 #else
 #define PRINT_COMSPEC(f,a)
 #define DEBUGSTR(s)
@@ -274,9 +273,9 @@ int ComspecInit();
 void ComspecDone(int aiRc);
 bool CoordInSmallRect(const COORD& cr, const SMALL_RECT& rc);
 void RefillConsoleAttributes(const CONSOLE_SCREEN_BUFFER_INFO& csbi5, WORD OldText, WORD NewText);
-BOOL SetConsoleSize(USHORT BufferHeight, COORD crNewSize, SMALL_RECT rNewRect, LPCSTR asLabel = NULL);
+BOOL SetConsoleSize(USHORT BufferHeight, COORD crNewSize, SMALL_RECT rNewRect, LPCSTR asLabel = NULL, bool bForceWriteLog = false);
 void CreateLogSizeFile(int nLevel, const CESERVER_CONSOLE_MAPPING_HDR* pConsoleInfo = NULL);
-void LogSize(const COORD* pcrSize, int newBufferHeight, LPCSTR pszLabel);
+void LogSize(const COORD* pcrSize, int newBufferHeight, LPCSTR pszLabel, bool bForceWriteLog = false);
 void LogString(LPCSTR asText);
 void LogString(LPCWSTR asText);
 void PrintExecuteError(LPCWSTR asCmd, DWORD dwErr, LPCWSTR asSpecialInfo=NULL);
@@ -320,15 +319,10 @@ extern FDebugSetProcessKillOnExit pfnDebugSetProcessKillOnExit;
 void ProcessDebugEvent();
 void _wprintf(LPCWSTR asBuffer);
 bool IsOutputRedirected();
-#ifdef CRTPRINTF
 void _printf(LPCSTR asBuffer);
 void _printf(LPCSTR asFormat, DWORD dwErr);
 void _printf(LPCSTR asFormat, DWORD dwErr, LPCWSTR asAddLine);
 void _printf(LPCSTR asFormat, DWORD dw1, DWORD dw2, LPCWSTR asAddLine=NULL);
-#else
-#define _printf printf
-//#define _wprintf(s) wprintf(L"%s",s)
-#endif
 void print_error(DWORD dwErr = 0, LPCSTR asFormat = NULL);
 HWND Attach2Gui(DWORD nTimeout);
 
@@ -486,6 +480,7 @@ struct SrvInfo
 	DWORD  nActiveFarPID; // PID последнего активного Far
 	BOOL   bWasDetached; // Выставляется в TRUE при получении CECMD_DETACHCON
 	BOOL   bWasReattached; // Если TRUE - то при следующем цикле нужно передернуть ReloadFullConsoleInfo(true)
+	BOOL   bStationLocked; // Don't read console output while station is locked
 	//
 	PipeServer<CESERVER_REQ> CmdServer;
 	HANDLE hRefreshThread;  DWORD dwRefreshThread;  BOOL bRefreshTermination;
@@ -572,6 +567,7 @@ struct SrvInfo
 	// Смена размера консоли через RefreshThread
 	LONG nRequestChangeSize;
 	BOOL bRequestChangeSizeResult;
+	bool bReqSizeForceLog;
 	USHORT nReqSizeBufferHeight;
 	COORD crReqSizeNewSize;
 	SMALL_RECT rReqSizeNewRect;
@@ -581,7 +577,7 @@ struct SrvInfo
 	//
 	HANDLE hAllowInputEvent; BOOL bInSyncResize;
 	//
-	DWORD nLastPacketID; // ИД пакета для отправки в GUI
+	LONG nLastPacketID; // ИД пакета для отправки в GUI
 
 	// Keyboard layout name
 	wchar_t szKeybLayout[KL_NAMELENGTH+1];

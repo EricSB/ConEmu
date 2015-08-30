@@ -45,6 +45,7 @@ $(INTDIR)\EmergencyShow.obj \
 $(INTDIR)\ExecPty.obj \
 $(INTDIR)\execute.obj \
 $(INTDIR)\GuiHooks.obj \
+$(INTDIR)\HkFunc.obj \
 $(INTDIR)\Infiltrate.obj \
 $(INTDIR)\InjectRemote.obj \
 $(INTDIR)\Injects.obj \
@@ -65,6 +66,7 @@ $(INTDIR)\RegPrepare.obj \
 $(INTDIR)\SetEnvVar.obj \
 $(INTDIR)\SrvPipes.obj \
 $(INTDIR)\WConsole.obj \
+$(INTDIR)\WConsoleInfo.obj \
 $(INTDIR)\WFiles.obj \
 $(INTDIR)\WObjects.obj \
 $(INTDIR)\WThreads.obj \
@@ -104,10 +106,10 @@ NOWIN98=/OPT:NOWIN98
 PDBNAME="$(OUTDIR)$(ADDOUTDIR)\$(OUTNAME).pdb"
 
 !ifndef DEBUG
-CPP_OPT=$(CPP_OPT) /DNDEBUG /Fd$(PDBNAME) /DHIDE_TODO /DCRTPRINTF
+CPP_OPT=$(CPP_OPT) /DNDEBUG /Fd$(PDBNAME) /DHIDE_TODO
 #/DCRTSTARTUP
 !else
-CPP_OPT=$(CPP_OPT) /DDEBUG /Zi /Fd$(PDBNAME) /DCRTPRINTF
+CPP_OPT=$(CPP_OPT) /DDEBUG /Zi /Fd$(PDBNAME)
 #/DCRTSTARTUP
 !endif
 
@@ -272,12 +274,8 @@ clean:
 	if not exist "$(RELEASEDIR)\$(NULL)" mkdir "$(RELEASEDIR)"
 	echo moving `$(DLLFULLNAME)` to `$(RELEASEDIR)\$(OUTNAME).dll`
 	move $(DLLFULLNAME) $(RELEASEDIR)\$(OUTNAME).dll
-#!ifdef DEBUG
-	@echo moving `$(PDBNAME)` to `$(RELEASEDIR)\$(OUTNAME).pdb`
-	@move $(PDBNAME) $(RELEASEDIR)\$(OUTNAME).pdb
-#!else
-#	@if exist $(PDBNAME) del $(PDBNAME)
-#!endif
+	@echo copying `$(PDBNAME)` to `$(RELEASEDIR)\$(OUTNAME).pdb`
+	@copy $(PDBNAME) $(RELEASEDIR)\$(OUTNAME).pdb
 	@echo moving `$(MAP)` to `$(RELEASEDIR)\$(OUTNAME).map`
 	@move $(MAP) $(RELEASEDIR)\$(OUTNAME).map
 
@@ -316,6 +314,8 @@ $(INTDIR)\ExecPty.obj: ../common/ExecPty.cpp ../common/ExecPty.h
 $(INTDIR)\execute.obj: ../common/execute.cpp ../common/execute.h
 
 $(INTDIR)\GuiHooks.obj: GuiHooks.cpp GuiHooks.h
+
+$(INTDIR)\HkFunc.obj: ../common/HkFunc.cpp ../common/HkFunc.h
 
 $(INTDIR)\Infiltrate.obj: Infiltrate.cpp
 
@@ -356,6 +356,8 @@ $(INTDIR)\SetEnvVar.obj: ../common/SetEnvVar.cpp
 $(INTDIR)\SrvPipes.obj: SrvPipes.cpp ../common/PipeServer.h
 
 $(INTDIR)\WConsole.obj: ../common/WConsole.cpp ../common/WConsole.h
+
+$(INTDIR)\WConsoleInfo.obj: ../common/WConsoleInfo.cpp ../common/WConsoleInfo.h
 
 $(INTDIR)\WFiles.obj: ../common/WFiles.cpp ../common/WFiles.h
 

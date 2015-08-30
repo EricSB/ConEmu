@@ -1,6 +1,6 @@
 ﻿
 /*
-Copyright (c) 2009-2014 Maximus5
+Copyright (c) 2009-2015 Maximus5
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -68,7 +68,19 @@ int ConEmuCheck(HWND* ahConEmuWnd);
 //  aiType==0: Gui console DC window
 //        ==1: Gui Main window
 //        ==2: Console window
+//        ==3: Back window
 HWND GetConEmuHWND(int aiType);
+
+// RealConsole window
+HWND myGetConsoleWindow();
+
+// Don't use gfGetRealConsoleWindow indirectly,
+// Use myGetConsoleWindow instead!
+typedef HWND(WINAPI* GetConsoleWindow_T)();
+//extern GetConsoleWindow_T gfGetRealConsoleWindow;
+
+bool isConsoleClass(LPCWSTR asClass);
+bool isConsoleWindow(HWND hWnd);
 
 //LPCWSTR CreatePipeName(wchar_t (&szGuiPipeName)[128], LPCWSTR asFormat, DWORD anValue);
 int GuiMessageBox(HWND hConEmuWndRoot, LPCWSTR asText, LPCWSTR asTitle, int anBtns);
@@ -79,7 +91,7 @@ bool ExecuteNewCmd(CESERVER_REQ* &ppCmd, DWORD &pcbCurMaxSize, DWORD nCmd, size_
 void ExecutePrepareCmd(CESERVER_REQ* pIn, DWORD nCmd, size_t cbSize);
 void ExecutePrepareCmd(CESERVER_REQ_HDR* pHdr, DWORD nCmd, size_t cbSize);
 CESERVER_REQ* ExecuteGuiCmd(HWND hConWnd, CESERVER_REQ* pIn, HWND hOwner, BOOL bAsyncNoResult = FALSE);
-CESERVER_REQ* ExecuteSrvCmd(DWORD dwSrvPID, CESERVER_REQ* pIn, HWND hOwner, BOOL bAsyncNoResult = FALSE, DWORD nTimeout = 0);
+CESERVER_REQ* ExecuteSrvCmd(DWORD dwSrvPID, CESERVER_REQ* pIn, HWND hOwner, BOOL bAsyncNoResult = FALSE, DWORD nTimeout = 0, BOOL bIgnoreAbsence = FALSE);
 CESERVER_REQ* ExecuteHkCmd(DWORD dwHkPID, CESERVER_REQ* pIn, HWND hOwner, BOOL bAsyncNoResult = FALSE, BOOL bIgnoreAbsence = FALSE);
 CESERVER_REQ* ExecuteCmd(const wchar_t* szGuiPipeName, CESERVER_REQ* pIn, DWORD nWaitPipe, HWND hOwner, BOOL bAsyncNoResult = FALSE, DWORD nServerPID = 0, BOOL bIgnoreAbsence = FALSE);
 void ExecuteFreeResult(CESERVER_REQ* &pOut);
@@ -94,8 +106,6 @@ CESERVER_REQ* ExecuteNewCmdOnCreate(CESERVER_CONSOLE_MAPPING_HDR* pSrvMap, HWND 
 				DWORD* anShellFlags, DWORD* anCreateFlags, DWORD* anStartFlags, DWORD* anShowCmd,
 				int mn_ImageBits, int mn_ImageSubsystem,
 				HANDLE hStdIn, HANDLE hStdOut, HANDLE hStdErr);
-
-HWND myGetConsoleWindow();
 
 extern SECURITY_ATTRIBUTES* gpLocalSecurity;
 extern u64 ghWorkingModule;

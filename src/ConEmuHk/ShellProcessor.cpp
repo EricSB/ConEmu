@@ -26,6 +26,13 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#ifdef _DEBUG
+//	#define PRINT_SHELL_LOG
+	#undef PRINT_SHELL_LOG
+#else
+	#undef PRINT_SHELL_LOG
+#endif
+
 #include <windows.h>
 #include <TCHAR.h>
 #include <Tlhelp32.h>
@@ -37,6 +44,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../common/common.hpp"
 #include "../common/ConEmuCheck.h"
 #include "../common/execute.h"
+#include "../common/HkFunc.h"
 #include "../common/WErrGuard.h"
 #include "../common/WObjects.h"
 #if defined(__GNUC__) && !defined(__MINGW32__)
@@ -50,6 +58,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "Injects.h"
 #include "SetHook.h"
 #include "ShellProcessor.h"
+#include "MainThread.h"
 
 #ifndef SEE_MASK_NOZONECHECKS
 #define SEE_MASK_NOZONECHECKS 0x800000
@@ -58,10 +67,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define SEE_MASK_NOASYNC 0x00000100
 #endif
 
-#ifdef _DEBUG
-	#define DefTermMsg(s) //MessageBox(NULL, s, L"ConEmuHk", MB_SYSTEMMODAL)
-#else
-	#define DefTermMsg(s) //MessageBox(NULL, s, L"ConEmuHk", MB_SYSTEMMODAL)
+#ifdef PRINT_SHELL_LOG
+#include <stdio.h>
 #endif
 
 
@@ -124,7 +131,6 @@ void TestShellProcessor()
 int gnInShellExecuteEx = 0;
 
 extern struct HookModeFar gFarMode;
-extern DWORD  gnHookMainThreadId;
 
 bool  CShellProc::mb_StartingNewGuiChildTab = 0;
 DWORD CShellProc::mn_LastStartedPID = 0;
@@ -384,7 +390,7 @@ BOOL CShellProc::LoadSrvMapping(BOOL bLightCheck /*= FALSE*/)
 		}
 
 		// Parameters are stored in the registry now
-		if (!isDefaultTerminalEnabled())
+		if (!isDefTermEnabled())
 		{
 			return FALSE;
 		}
@@ -409,7 +415,7 @@ BOOL CShellProc::LoadSrvMapping(BOOL bLightCheck /*= FALSE*/)
 			*gpDefaultTermParm = m_GuiMapping;
 
 			// Checking loaded settings
-			if (!isDefaultTerminalEnabled())
+			if (!isDefTermEnabled())
 			{
 				return FALSE; // disabled now
 			}
@@ -591,9 +597,9 @@ void CShellProc::CheckHooksDisabled()
 	mb_Opt_SkipCmdStart = bHooksSkipCmdStart;
 }
 
-BOOL CShellProc::ChangeExecuteParms(enum CmdOnCreateType aCmd, BOOL abNewConsole,
+BOOL CShellProc::ChangeExecuteParms(enum CmdOnCreateType aCmd,
 				LPCWSTR asFile, LPCWSTR asParam, LPCWSTR asExeFile,
-				const RConStartArgs& args,
+				ChangeExecFlags Flags, const RConStartArgs& args,
 				DWORD& ImageBits, DWORD& ImageSubsystem,
 				LPWSTR* psFile, LPWSTR* psParam)
 {
@@ -762,7 +768,7 @@ BOOL CShellProc::ChangeExecuteParms(enum CmdOnCreateType aCmd, BOOL abNewConsole
 			{
 				if (psz[0] == L'/' && wcschr(L"CcKk", psz[1]))
 				{
-					if (abNewConsole)
+					if (Flags & CEF_NEWCON_SWITCH)
 					{
 						// 111211 - "-new_console" передается в GUI
 						lbComSpecK = FALSE;
@@ -1069,6 +1075,11 @@ BOOL CShellProc::ChangeExecuteParms(enum CmdOnCreateType aCmd, BOOL abNewConsole
 		nCchSize += gpDefTerm->GetSrvAddArgs((aCmd == eCreateProcess), szDefTermArg, szDefTermArg2);
 	}
 
+	if (Flags & CEF_NEWCON_PREPEND)
+	{
+		nCchSize += 16; // + "-new_console " for "start" processing
+	}
+
 	// В ShellExecute необходимо "ConEmuC.exe" вернуть в psFile, а для CreatePocess - в psParam
 	// /C или /K в обоих случаях нужно пихать в psParam
 	_ASSERTE(lbEndQuote == FALSE); // Must not be set yet
@@ -1150,6 +1161,9 @@ BOOL CShellProc::ChangeExecuteParms(enum CmdOnCreateType aCmd, BOOL abNewConsole
 	else
 	{
 		_wcscat_c((*psParam), nCchSize, lbComSpecK ? L" /K " : L" /C ");
+		// If was used "start" from cmd prompt or batch
+		if (Flags & CEF_NEWCON_PREPEND)
+			_wcscat_c((*psParam), nCchSize, L"-new_console ");
 	}
 	if (asParam && *asParam == L' ')
 		asParam++;
@@ -1355,8 +1369,7 @@ BOOL CShellProc::ChangeExecuteParms(enum CmdOnCreateType aCmd, BOOL abNewConsole
 		_wcscat_c((*psParam), nCchSize, L"\"");
 	}
 
-
-#ifdef _DEBUG
+	// logging
 	{
 		int cchLen = (*psFile ? lstrlen(*psFile) : 0) + (*psParam ? lstrlen(*psParam) : 0) + 128;
 		wchar_t* pszDbgMsg = (wchar_t*)calloc(cchLen, sizeof(wchar_t));
@@ -1366,11 +1379,10 @@ BOOL CShellProc::ChangeExecuteParms(enum CmdOnCreateType aCmd, BOOL abNewConsole
 				GetCurrentProcessId(),
 				(aCmd == eShellExecute) ? L"Shell" : (aCmd == eCreateProcess) ? L"Create" : L"???",
 				*psFile ? *psFile : L"", *psParam ? *psParam : L"");
-			OutputDebugString(pszDbgMsg);
+			LogShellString(pszDbgMsg);
 			free(pszDbgMsg);
 		}
 	}
-#endif
 
 	lbRc = TRUE;
 wrap:
@@ -1406,8 +1418,11 @@ int CShellProc::PrepareExecuteParms(
 	// !!! anFlags может быть NULL;
 	// !!! asAction может быть NULL;
 	_ASSERTE(*psFile==NULL && *psParam==NULL);
-	if (!ghConEmuWndDC && !isDefaultTerminalEnabled())
+	if (!ghConEmuWndDC && !isDefTermEnabled())
 		return 0; // Перехватывать только под ConEmu
+
+	if (!asFile && !asParam)
+		return 0; // That is most probably asAction="OpenNewWindow"
 
 	// Just in case of unexpected LastError changes
 	ScopedObject(CLastErrorGuard);
@@ -1480,12 +1495,48 @@ int CShellProc::PrepareExecuteParms(
 		}
 		DWORD nLen = lstrlen(sErrMsg);
 		WriteConsoleW(hStdOut, sErrMsg, nLen, &nLen, NULL);
+		LogShellString(L"ANSICON was blocked");
 		return -1;
 	}
 	ms_ExeTmp.Empty();
 
 
 	BOOL bGoChangeParm = FALSE;
+
+	// DefTerm logging
+	wchar_t szInfo[140];
+	#define LogExit(frc) \
+		msprintf(szInfo, countof(szInfo), \
+			L"PrepareExecuteParms rc=%i %u:%u:%u W:%u I:%u,%u,%u D:%u H:%u S:%u,%u line=%i", \
+			(frc), \
+			(UINT)mn_ImageSubsystem, (UINT)mn_ImageBits, (UINT)mb_isCurrentGuiClient, \
+			(UINT)mb_WasSuspended, (UINT)mb_NeedInjects, (UINT)mb_PostInjectWasRequested, \
+			(UINT)mb_Opt_DontInject, (UINT)mb_DebugWasRequested, (UINT)mb_HiddenConsoleDetachNeed, \
+			(UINT)mb_Opt_SkipNewConsole, (UINT)mb_Opt_SkipCmdStart, \
+			__LINE__); \
+		LogShellString(szInfo);
+
+	{ // Log PrepareExecuteParms function call -begin
+	lstrcpyn(szInfo, asAction ? asAction : L"-exec-", countof(szInfo));
+	struct ParmsStr { LPDWORD pVal; LPCWSTR pName; }
+	Parms[] = {
+		{anShellFlags, L"ShellFlags"},
+		{anCreateFlags, L"CreateFlags"},
+		{anStartFlags, L"StartFlags"},
+		{anShowCmd, L"ShowCmd"}
+	};
+	for (INT_PTR i = 0; i < countof(Parms); i++)
+	{
+		if (!Parms[i].pVal)
+			continue;
+		int iLen = lstrlen(szInfo);
+		msprintf(szInfo+iLen, countof(szInfo)-iLen, L" %s:x%X", Parms[i].pName, *Parms[i].pVal);
+	}
+	CEStr lsLog = lstrmerge(
+		(aCmd == eShellExecute) ? L"PrepareExecuteParms Shell " : L"PrepareExecuteParms Create ",
+		szInfo, asFile, asParam);
+	LogShellString(lsLog);
+	} // Log PrepareExecuteParms function call -end
 
 	// Для логирования - запомним сразу
 	HANDLE hIn  = lphStdIn  ? *lphStdIn  : NULL;
@@ -1543,7 +1594,8 @@ int CShellProc::PrepareExecuteParms(
 	// Current application is GUI subsystem run in ConEmu tab?
 	CheckIsCurrentGuiClient();
 
-	bool bNewConsoleArg = false, bForceNewConsole = false, bCurConsoleArg = false;
+	ChangeExecFlags NewConsoleFlags = CEF_DEFAULT;
+	bool bForceNewConsole = false, bCurConsoleArg = false;
 
 	// Service object (moved to members: RConStartArgs m_Args)
 	_ASSERTEX(m_Args.pszSpecialCmd == NULL); // Must not be touched yet!
@@ -1580,6 +1632,7 @@ int CShellProc::PrepareExecuteParms(
 		// Настройка в ConEmu ConEmuGuiMapping.bUseInjects, или gFarMode.bFarHookMode. Иначе - сразу выходим
 		if (!bLongConsoleOutput)
 		{
+			LogExit(0);
 			return 0;
 		}
 	}
@@ -1606,6 +1659,7 @@ int CShellProc::PrepareExecuteParms(
 				)
 			{
 				// Creating process without console window, not our case
+				LogExit(0);
 				return 0;
 			}
 			// GDB console debugging
@@ -1618,6 +1672,7 @@ int CShellProc::PrepareExecuteParms(
 					if (mn_ImageSubsystem == IMAGE_SUBSYSTEM_WINDOWS_CUI)
 					{
 						mb_DebugWasRequested = true;
+						LogExit(0);
 						return 0;
 					}
 				}
@@ -1629,18 +1684,21 @@ int CShellProc::PrepareExecuteParms(
 			if (!asAction || (lstrcmpi(asAction, L"runas") != 0))
 			{
 				// This may be, for example, starting of "Taskmgr.exe" from "explorer.exe"
+				LogExit(0);
 				return 0;
 			}
 			// Skip some executions
 			if (anShellFlags
 				&& ((*anShellFlags) & (SEE_MASK_CLASSNAME|SEE_MASK_CLASSKEY|SEE_MASK_IDLIST|SEE_MASK_INVOKEIDLIST)))
 			{
+				LogExit(0);
 				return 0;
 			}
 		}
 		else
 		{
 			_ASSERTE(FALSE && "Unsupported in Default terminal");
+			LogExit(0);
 			return 0;
 		}
 
@@ -1649,6 +1707,7 @@ int CShellProc::PrepareExecuteParms(
 			)
 		{
 			// Creating process with window initially hidden, not our case
+			LogExit(0);
 			return 0;
 		}
 
@@ -1710,14 +1769,16 @@ int CShellProc::PrepareExecuteParms(
 			if (FAILED(hr) || !pShellLink)
 			{
 				DisplayLastError(L"Can't create IID_IShellLinkW", (DWORD)hr);
-				return NULL;
+				LogExit(0);
+				return 0;
 			}
 			hr = pShellLink->QueryInterface(IID_IPersistFile, (void**)&pFile);
 			if (FAILED(hr) || !pFile)
 			{
 				DisplayLastError(L"Can't create IID_IPersistFile", (DWORD)hr);
 				pShellLink->Release();
-				return NULL;
+				LogExit(0);
+				return 0;
 			}
 		}
 
@@ -1839,7 +1900,6 @@ int CShellProc::PrepareExecuteParms(
 	}
 
 	BOOL lbChanged = FALSE;
-	CEStr strForceNewConsole; // If was used "start" from cmd prompt or batch
 	mb_NeedInjects = FALSE;
 	//wchar_t szBaseDir[MAX_PATH+2]; szBaseDir[0] = 0;
 	CESERVER_REQ *pIn = NULL;
@@ -1850,7 +1910,7 @@ int CShellProc::PrepareExecuteParms(
 			hIn, hOut, hErr/*, szBaseDir, mb_DosBoxAllowed*/);
 	if (pIn)
 	{
-		HWND hConWnd = GetConsoleWindow();
+		HWND hConWnd = GetRealConsoleWindow();
 		CESERVER_REQ *pOut = NULL;
 		pOut = ExecuteGuiCmd(hConWnd, pIn, hConWnd);
 		ExecuteFreeResult(pIn); pIn = NULL;
@@ -1873,7 +1933,7 @@ int CShellProc::PrepareExecuteParms(
 		goto wrap;
 	}
 
-#ifdef _DEBUG
+	// logging
 	{
 		int cchLen = (asFile ? lstrlen(asFile) : 0) + (asParam ? lstrlen(asParam) : 0) + 128;
 		wchar_t* pszDbgMsg = (wchar_t*)calloc(cchLen, sizeof(wchar_t));
@@ -1883,11 +1943,10 @@ int CShellProc::PrepareExecuteParms(
 				GetCurrentProcessId(),
 				(aCmd == eShellExecute) ? L"Shell" : (aCmd == eCreateProcess) ? L"Create" : L"???",
 				asFile ? asFile : L"", asParam ? asParam : L"");
-			OutputDebugString(pszDbgMsg);
+			LogShellString(pszDbgMsg);
 			free(pszDbgMsg);
 		}
 	}
-#endif
 
 	//wchar_t* pszExecFile = (wchar_t*)pOut->OnCreateProcRet.wsValue;
 	//wchar_t* pszBaseDir = (wchar_t*)(pOut->OnCreateProcRet.wsValue); // + pOut->OnCreateProcRet.nFileLen);
@@ -1899,7 +1958,7 @@ int CShellProc::PrepareExecuteParms(
 		{
 			if (m_Args.NewConsole == crb_On)
 			{
-				bNewConsoleArg = true;
+				NewConsoleFlags |= CEF_NEWCON_SWITCH;
 			}
 			else
 			{
@@ -1923,7 +1982,7 @@ int CShellProc::PrepareExecuteParms(
 	}
 	// Если GUI приложение работает во вкладке ConEmu - запускать консольные приложение в новой вкладке ConEmu
 	// Use mb_isCurrentGuiClient instead of ghAttachGuiClient, because of 'CommandPromptPortable.exe' for example
-	if (!bNewConsoleArg
+	if (!(NewConsoleFlags & CEF_NEWCON_SWITCH)
 		&& mb_isCurrentGuiClient && (mn_ImageSubsystem == IMAGE_SUBSYSTEM_WINDOWS_CUI)
 		&& ((anShowCmd == NULL) || (*anShowCmd != SW_HIDE)))
 	{
@@ -1949,7 +2008,7 @@ int CShellProc::PrepareExecuteParms(
 			bForceNewConsole = true;
 		}
 	}
-	if (mb_isCurrentGuiClient && (bNewConsoleArg || bForceNewConsole) && !lbGuiApp)
+	if (mb_isCurrentGuiClient && ((NewConsoleFlags & CEF_NEWCON_SWITCH) || bForceNewConsole) && !lbGuiApp)
 	{
 		lbGuiApp = true;
 	}
@@ -1957,7 +2016,7 @@ int CShellProc::PrepareExecuteParms(
 	if ((aCmd == eCreateProcess)
 		&& !mb_Opt_SkipCmdStart // Issue 1822
 		&& (anCreateFlags && (*anCreateFlags & (CREATE_NEW_CONSOLE)))
-		&& !bNewConsoleArg && !bForceNewConsole
+		&& !(NewConsoleFlags & CEF_NEWCON_SWITCH) && !bForceNewConsole
 		&& (mn_ImageSubsystem == IMAGE_SUBSYSTEM_WINDOWS_CUI)
 		&& ((anShowCmd == NULL)
 			|| ((*anShowCmd != SW_HIDE)
@@ -1966,10 +2025,8 @@ int CShellProc::PrepareExecuteParms(
 		)
 	{
 		*anShowCmd = SW_HIDE;
-		bNewConsoleArg = true;
+		NewConsoleFlags |= CEF_NEWCON_PREPEND;
 		m_Args.NewConsole = crb_On;
-		strForceNewConsole.Attach(lstrmerge(asParam, (asParam && *asParam) ? L" " : NULL, L"-new_console"));
-		asParam = strForceNewConsole;
 	}
 
 	if (bLongConsoleOutput)
@@ -1996,7 +2053,7 @@ int CShellProc::PrepareExecuteParms(
 		else
 		{
 			// Если bNewConsoleArg - то однозначно стартовать в новой вкладке ConEmu (GUI теперь тоже цеплять умеем)
-			if (bNewConsoleArg || bForceNewConsole)
+			if (NewConsoleFlags || bForceNewConsole)
 			{
 				if (anShellFlags)
 				{
@@ -2052,7 +2109,7 @@ int CShellProc::PrepareExecuteParms(
 	//if (GetImageSubsystem(pszExecFile,ImageSubsystem,ImageBits))
 	//lbGuiApp = (ImageSubsystem == IMAGE_SUBSYSTEM_WINDOWS_GUI);
 
-	if (lbGuiApp && !(bNewConsoleArg || bForceNewConsole || bVsNetHostRequested))
+	if (lbGuiApp && !(NewConsoleFlags || bForceNewConsole || bVsNetHostRequested))
 	{
 		if (gbAttachGuiClient && !ghAttachGuiClient && (mn_ImageBits != 16) && (m_Args.InjectsDisable != crb_On))
 		{
@@ -2071,7 +2128,7 @@ int CShellProc::PrepareExecuteParms(
 
 	#ifdef _DEBUG
 	// Для принудительной вставки ConEmuC.exe - поставить true. Только для отладки!
-	bool lbAlwaysAddConEmuC = false;
+	bool lbAlwaysAddConEmuC; lbAlwaysAddConEmuC = false;
 	#endif
 
 	if ((mn_ImageBits == 0) && (mn_ImageSubsystem == 0)
@@ -2096,10 +2153,10 @@ int CShellProc::PrepareExecuteParms(
 	else
 	{
 		bGoChangeParm = ((bLongConsoleOutput)
-			|| (lbGuiApp && (bNewConsoleArg || bForceNewConsole)) // хотят GUI прицепить к новой вкладке в ConEmu, или новую консоль из GUI
+			|| (lbGuiApp && (NewConsoleFlags || bForceNewConsole)) // хотят GUI прицепить к новой вкладке в ConEmu, или новую консоль из GUI
 			// eCreateProcess перехватывать не нужно (сами сделаем InjectHooks после CreateProcess)
 			|| ((mn_ImageBits != 16) && (m_SrvMapping.bUseInjects & 1)
-				&& (bNewConsoleArg
+				&& (NewConsoleFlags
 					|| (bLongConsoleOutput && (aCmd == eShellExecute))
 					|| (bCurConsoleArg && (m_Args.LongOutputDisable != crb_On))
 					#ifdef _DEBUG
@@ -2141,8 +2198,8 @@ int CShellProc::PrepareExecuteParms(
 			goto wrap;
 		}
 
-		lbChanged = ChangeExecuteParms(aCmd, bNewConsoleArg, asFile, asParam,
-						ms_ExeTmp, m_Args, mn_ImageBits, mn_ImageSubsystem, psFile, psParam);
+		lbChanged = ChangeExecuteParms(aCmd, asFile, asParam, ms_ExeTmp,
+			NewConsoleFlags, m_Args, mn_ImageBits, mn_ImageSubsystem, psFile, psParam);
 
 		if (!lbChanged)
 		{
@@ -2155,9 +2212,9 @@ int CShellProc::PrepareExecuteParms(
 			// Замена на "ConEmuC.exe ...", все "-new_console" / "-cur_console" будут обработаны в нем
 			bCurConsoleArg = false;
 
-			HWND hConWnd = GetConsoleWindow();
+			HWND hConWnd = GetRealConsoleWindow();
 
-			if (lbGuiApp && (bNewConsoleArg || bForceNewConsole))
+			if (lbGuiApp && (NewConsoleFlags || bForceNewConsole))
 			{
 				if (anShowCmd)
 					*anShowCmd = SW_HIDE;
@@ -2210,7 +2267,7 @@ int CShellProc::PrepareExecuteParms(
 			&& !bDontForceInjects;
 
 		// Параметр -cur_console / -new_console нужно вырезать
-		if (bNewConsoleArg || bCurConsoleArg)
+		if (NewConsoleFlags || bCurConsoleArg)
 		{
 			_ASSERTEX(m_Args.pszSpecialCmd!=NULL && "Must be replaced already!");
 
@@ -2269,7 +2326,7 @@ wrap:
 
 					if (bNeedChange)
 					{
-						bBufChanged = SetConsoleScreenBufferSize(hConOut, csbi.dwSize);
+						bBufChanged = hkFunc.setConsoleScreenBufferSize(hConOut, csbi.dwSize);
 					}
 					UNREFERENCED_PARAMETER(bBufChanged);
 				}
@@ -2287,8 +2344,9 @@ wrap:
 		CheckHookServer();
 	}
 
+	LogExit(lbChanged ? 1 : 0);
 	return lbChanged ? 1 : 0;
-}
+} // PrepareExecuteParms
 
 void CShellProc::GetStartingExeName(LPCWSTR asFile, LPCWSTR asParam, CmdArg& rsExeTmp)
 {
@@ -2322,8 +2380,11 @@ void CShellProc::GetStartingExeName(LPCWSTR asFile, LPCWSTR asParam, CmdArg& rsE
 // returns FALSE if need to block execution
 BOOL CShellProc::OnShellExecuteA(LPCSTR* asAction, LPCSTR* asFile, LPCSTR* asParam, LPCSTR* asDir, DWORD* anFlags, DWORD* anShowCmd)
 {
-	if ((!ghConEmuWndDC || !IsWindow(ghConEmuWndDC)) && !isDefaultTerminalEnabled())
+	if ((!ghConEmuWndDC || !IsWindow(ghConEmuWndDC)) && !isDefTermEnabled())
+	{
+		LogShellString(L"OnShellExecuteA skipped");
 		return TRUE; // Перехватывать только под ConEmu
+	}
 
 	mb_InShellExecuteEx = TRUE;
 	gnInShellExecuteEx ++;
@@ -2375,8 +2436,11 @@ BOOL CShellProc::OnShellExecuteA(LPCSTR* asAction, LPCSTR* asFile, LPCSTR* asPar
 // returns FALSE if need to block execution
 BOOL CShellProc::OnShellExecuteW(LPCWSTR* asAction, LPCWSTR* asFile, LPCWSTR* asParam, LPCWSTR* asDir, DWORD* anFlags, DWORD* anShowCmd)
 {
-	if ((!ghConEmuWndDC || !IsWindow(ghConEmuWndDC)) && !isDefaultTerminalEnabled())
+	if ((!ghConEmuWndDC || !IsWindow(ghConEmuWndDC)) && !isDefTermEnabled())
+	{
+		LogShellString(L"OnShellExecuteW skipped");
 		return TRUE; // Перехватывать только под ConEmu
+	}
 
 	mb_InShellExecuteEx = TRUE;
 	gnInShellExecuteEx ++;
@@ -2443,8 +2507,11 @@ BOOL CShellProc::OnShellExecuteExA(LPSHELLEXECUTEINFOA* lpExecInfo)
 	if (!lpExecInfo)
 		return TRUE;
 
-	if ((!ghConEmuWndDC || !IsWindow(ghConEmuWndDC)) && !isDefaultTerminalEnabled())
+	if ((!ghConEmuWndDC || !IsWindow(ghConEmuWndDC)) && !isDefTermEnabled())
+	{
+		LogShellString(L"OnShellExecuteExA skipped");
 		return TRUE; // Перехватывать только под ConEmu
+	}
 
 	mlp_SaveExecInfoA = *lpExecInfo;
 	mlp_ExecInfoA = (LPSHELLEXECUTEINFOA)malloc((*lpExecInfo)->cbSize);
@@ -2471,8 +2538,11 @@ BOOL CShellProc::OnShellExecuteExW(LPSHELLEXECUTEINFOW* lpExecInfo)
 	if (!lpExecInfo)
 		return TRUE;
 
-	if ((!ghConEmuWndDC || !IsWindow(ghConEmuWndDC)) && !isDefaultTerminalEnabled())
+	if ((!ghConEmuWndDC || !IsWindow(ghConEmuWndDC)) && !isDefTermEnabled())
+	{
+		LogShellString(L"OnShellExecuteExW skipped");
 		return TRUE; // Перехватывать только под ConEmu или в DefTerm
+	}
 
 	mlp_SaveExecInfoW = *lpExecInfo;
 	mlp_ExecInfoW = (LPSHELLEXECUTEINFOW)malloc((*lpExecInfo)->cbSize);
@@ -2497,7 +2567,10 @@ BOOL CShellProc::OnShellExecuteExW(LPSHELLEXECUTEINFOW* lpExecInfo)
 BOOL CShellProc::OnCreateProcessA(LPCSTR* asFile, LPCSTR* asCmdLine, LPCSTR* asDir, DWORD* anCreationFlags, LPSTARTUPINFOA lpSI)
 {
 	if (!ghConEmuWndDC || !IsWindow(ghConEmuWndDC))
+	{
+		LogShellString(L"OnCreateProcessA skipped");
 		return TRUE; // Перехватывать только под ConEmu
+	}
 
 	mpwsz_TempFile = str2wcs(asFile ? *asFile : NULL, mn_CP);
 	mpwsz_TempParam = str2wcs(asCmdLine ? *asCmdLine : NULL, mn_CP);
@@ -2560,12 +2633,13 @@ BOOL CShellProc::OnCreateProcessW(LPCWSTR* asFile, LPCWSTR* asCmdLine, LPCWSTR* 
 {
 	if (!ghConEmuWndDC || !IsWindow(ghConEmuWndDC))
 	{
-		if (isDefaultTerminalEnabled())
+		if (isDefTermEnabled())
 		{
 			// OK, continue to "Default terminal" feature (console applications and batch files only)
 		}
 		else
 		{
+			LogShellString(L"OnCreateProcessW skipped");
 			return TRUE; // Перехватывать только под ConEmu
 		}
 	}
@@ -2653,7 +2727,7 @@ BOOL CShellProc::OnCreateProcessW(LPCWSTR* asFile, LPCWSTR* asCmdLine, LPCWSTR* 
 		}
 	}
 	// Avoid flickering of RealConsole while starting debugging with DefTerm feature
-	else if (isDefaultTerminalEnabled() && !bConsoleNoWindow && nShowCmd && anCreationFlags && lpSI)
+	else if (isDefTermEnabled() && !bConsoleNoWindow && nShowCmd && anCreationFlags && lpSI)
 	{
 		switch (mn_ImageSubsystem)
 		{
@@ -2663,7 +2737,7 @@ BOOL CShellProc::OnCreateProcessW(LPCWSTR* asFile, LPCWSTR* asCmdLine, LPCWSTR* 
 			{
 				// Запуск отладчика Win32 приложения из VisualStudio (например)
 				// Финт ушами для избежания мелькания RealConsole window
-				HWND hConWnd = GetConsoleWindow();
+				HWND hConWnd = GetRealConsoleWindow();
 				if (hConWnd == NULL)
 				{
 					_ASSERTE(gnServerPID==0);
@@ -2717,7 +2791,7 @@ BOOL CShellProc::OnCreateProcessW(LPCWSTR* asFile, LPCWSTR* asCmdLine, LPCWSTR* 
 
 void CShellProc::OnCreateProcessFinished(BOOL abSucceeded, PROCESS_INFORMATION *lpPI)
 {
-#ifdef _DEBUG
+	// logging
 	{
 		int cchLen = 255;
 		wchar_t* pszDbgMsg = (wchar_t*)calloc(cchLen, sizeof(wchar_t));
@@ -2741,11 +2815,10 @@ void CShellProc::OnCreateProcessFinished(BOOL abSucceeded, PROCESS_INFORMATION *
 				}
 			}
 			_wcscat_c(pszDbgMsg, cchLen, L"\n");
-			OutputDebugString(pszDbgMsg);
+			LogShellString(pszDbgMsg);
 			free(pszDbgMsg);
 		}
 	}
-#endif
 
 	BOOL bAttachCreated = FALSE;
 
@@ -2778,13 +2851,14 @@ void CShellProc::OnCreateProcessFinished(BOOL abSucceeded, PROCESS_INFORMATION *
 			}
 		}
 
-		if (isDefaultTerminalEnabled())
+		if (isDefTermEnabled())
 		{
 			_ASSERTEX(!mb_NeedInjects);
-			// Starting .Net debugging session from VS
+			// Starting .Net debugging session from VS or CodeBlocks console app (gdb)
 			if (mb_PostInjectWasRequested)
 			{
 				// This is "*.vshost.exe", it is GUI wich can be used for debugging .Net console applications
+				// Also in CodeBlocks' gdb debugger
 				if (mb_WasSuspended)
 				{
 					// Supposing Studio will process only one "*.vshost.exe" at a time
@@ -2815,21 +2889,23 @@ void CShellProc::OnCreateProcessFinished(BOOL abSucceeded, PROCESS_INFORMATION *
 						(LPCWSTR)szSrvArgs);
 					STARTUPINFO si = {sizeof(si)};
 					PROCESS_INFORMATION pi = {};
-					bAttachCreated = CreateProcess(NULL, pszCmdLine, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, m_SrvMapping.ComSpec.ConEmuBaseDir, &si, &pi);
+					bAttachCreated = hkFunc.createProcess(NULL, pszCmdLine, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, m_SrvMapping.ComSpec.ConEmuBaseDir, &si, &pi);
 					if (bAttachCreated)
 					{
 						CloseHandle(pi.hProcess);
 						CloseHandle(pi.hThread);
 					}
-					#ifdef _DEBUG
 					else
 					{
 						DWORD nErr = GetLastError();
 						wchar_t* pszDbg = (wchar_t*)malloc(MAX_PATH*3*sizeof(*pszDbg));
-						msprintf(pszDbg, MAX_PATH*3, L"ConEmuHk: Failed to start attach server, Err=%u! %s\n", nErr, pszCmdLine);
-						OutputDebugString(pszDbg);
+						if (pszDbg)
+						{
+							msprintf(pszDbg, MAX_PATH*3, L"ConEmuHk: Failed to start attach server, Err=%u! %s\n", nErr, pszCmdLine);
+							LogShellString(pszDbg);
+							free(pszDbg);
+						}
 					}
-					#endif
 					free(pszCmdLine);
 				}
 			}
@@ -2837,7 +2913,6 @@ void CShellProc::OnCreateProcessFinished(BOOL abSucceeded, PROCESS_INFORMATION *
 		else if (mb_NeedInjects)
 		{
 			wchar_t szDbgMsg[255];
-			#ifdef _DEBUG
 			msprintf(szDbgMsg, countof(szDbgMsg), L"InjectHooks(x%u), ParentPID=%u, ChildPID=%u\n",
 					#ifdef _WIN64
 						64
@@ -2845,8 +2920,7 @@ void CShellProc::OnCreateProcessFinished(BOOL abSucceeded, PROCESS_INFORMATION *
 						86
 					#endif
 						, GetCurrentProcessId(), lpPI->dwProcessId);
-			OutputDebugString(szDbgMsg);
-			#endif
+			LogShellString(szDbgMsg);
 
 			CINJECTHK_EXIT_CODES iHookRc = InjectHooks(*lpPI, (m_SrvMapping.cbSize && (m_SrvMapping.nLoggingType == glt_Processes)));
 
@@ -2903,7 +2977,8 @@ bool CShellProc::OnResumeDebugeeThreadCalled(HANDLE hThread, PROCESS_INFORMATION
 		Sleep(50);
 		SuspendThread(hThread);
 
-
+		// We need to ensure that process has been 'started'
+		// If not - CreateToolhelp32Snapshot will return ERROR_PARTIAL_COPY
 		HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, nPID);
 		if (hSnap && (hSnap != INVALID_HANDLE_VALUE))
 		{
@@ -2916,6 +2991,7 @@ bool CShellProc::OnResumeDebugeeThreadCalled(HANDLE hThread, PROCESS_INFORMATION
 			bNotInitialized = (nErrCode == ERROR_PARTIAL_COPY);
 		}
 
+		// Wait for 5 seconds max
 		nDelta = (nCurTick = GetTickCount()) - nStartTick;
 		if (nDelta > nDeltaMax)
 			break;
@@ -2968,4 +3044,13 @@ void CShellProc::OnShellFinished(BOOL abSucceeded, HINSTANCE ahInstApp, HANDLE a
 			gnInShellExecuteEx--;
 		mb_InShellExecuteEx = FALSE;
 	}
+}
+
+void CShellProc::LogShellString(LPCWSTR asMessage)
+{
+	DefTermLogString(asMessage);
+
+	#ifdef PRINT_SHELL_LOG
+	wprintf(L"%s\n", asMessage);
+	#endif
 }

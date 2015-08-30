@@ -1,6 +1,6 @@
 ﻿
 /*
-Copyright (c) 2013-2014 Maximus5
+Copyright (c) 2013-2015 Maximus5
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -109,6 +109,11 @@ class MPipe
 				else if (_CancelIo)
 					_CancelIo(mh_Pipe);
 				CloseHandle(mh_Pipe);
+			}
+			if (m_Ovl.hEvent)
+			{
+				SafeCloseHandle(m_Ovl.hEvent);
+				m_Ovl.hEvent = NULL;
 			}
 
 			mh_Pipe = NULL;

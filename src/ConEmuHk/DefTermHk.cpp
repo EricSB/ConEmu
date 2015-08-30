@@ -1,6 +1,6 @@
 ﻿
 /*
-Copyright (c) 2012-2014 Maximus5
+Copyright (c) 2012-2015 Maximus5
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -27,6 +27,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include "../common/common.hpp"
+#include "../common/MFileLog.h"
+#include "../common/HkFunc.h"
 #include "ConEmuHooks.h"
 #include "DefTermHk.h"
 #include "../ConEmu/version.h"
@@ -61,7 +63,7 @@ bool gbIsGdbHost = false;
 CDefTermHk* gpDefTerm = NULL;
 
 // helper
-bool isDefaultTerminalEnabled()
+bool isDefTermEnabled()
 {
 	if (!gbPrepareDefaultTerminal || !gpDefTerm)
 		return false;
@@ -70,15 +72,13 @@ bool isDefaultTerminalEnabled()
 	return true;
 }
 
-bool InitDefaultTerm()
+bool InitDefTerm()
 {
 	bool lbRc = true;
 
-	#ifdef _DEBUG
-	wchar_t szInfo[100];
+	wchar_t szInfo[MAX_PATH*2];
 	msprintf(szInfo, countof(szInfo), L"!!! TH32CS_SNAPMODULE, TID=%u, InitDefaultTerm\n", GetCurrentThreadId());
-	DebugStr(szInfo);
-	#endif
+	DebugStr(szInfo); // Don't call DefTermLogString here - gpDefTerm was not initialized yet
 
 	_ASSERTEX(gpDefTerm==NULL);
 	gpDefTerm = new CDefTermHk();
@@ -122,6 +122,11 @@ bool InitDefaultTerm()
 				lstrcpyn(szCheckName, PointToName(mi.szExePath), nCurLen+1);
 				if (lstrcmpi(szCheckName, szAddName) == 0)
 				{
+					msprintf(szInfo, countof(szInfo),
+						L"Prevous ConEmuHk module found at address " WIN3264TEST(L"0x%08X",L"0x%X%08X") L": %s",
+						WIN3264WSPRINT(mi.hModule), mi.szExePath);
+					DefTermLogString(szInfo);
+
 					hPrevHooks = mi.hModule;
 					break; // Prev (old version) instance found!
 				}
@@ -134,9 +139,15 @@ bool InitDefaultTerm()
 	// Old library was found, unload it before continue
 	if (hPrevHooks)
 	{
+		DefTermLogString(L"Trying to unload previous ConEmuHk module");
 		if (!FreeLibrary(hPrevHooks))
 		{
 			lbRc = false;
+			gpDefTerm->DisplayLastError(L"Unloading failed", GetLastError());
+		}
+		else
+		{
+			DefTermLogString(L"Unloading succeeded");
 		}
 	}
 
@@ -155,6 +166,7 @@ bool InitDefaultTerm()
 					if (IsVsNetHostExe(pe.szExeFile)) // *.vshost.exe
 					{
 						// Found! Hook it!
+						DefTermLogString(L"Child VsNetHost found, hooking");
 						gpDefTerm->StartDefTermHooker(pe.th32ProcessID);
 						break;
 					}
@@ -164,14 +176,54 @@ bool InitDefaultTerm()
 		}
 	}
 
-	#ifdef _DEBUG
-	DebugStr(L"InitDefaultTerm finished\n");
-	#endif
+	DefTermLogString(L"InitDefaultTerm finished, calling StartDefTerm");
 
 	gpDefTerm->StartDefTerm();
 
 	return lbRc;
 }
+
+void DefTermLogString(LPCSTR asMessage, LPCWSTR asLabel /*= NULL*/)
+{
+	if (!gpDefTerm || !asMessage || !*asMessage)
+		return;
+	INT_PTR iLen = lstrlenA(asMessage);
+	CEStr lsMsg;
+	MultiByteToWideChar(CP_ACP, 0, asMessage, iLen, lsMsg.GetBuffer(iLen), iLen);
+	DefTermLogString(lsMsg.ms_Arg, asLabel);
+}
+
+void DefTermLogString(LPCWSTR asMessage, LPCWSTR asLabel /*= NULL*/)
+{
+	if (!asMessage || !*asMessage)
+	{
+		return;
+	}
+
+	// To ensure that we may force debug output for troubleshooting
+	// even from non-def-term-ed applications
+	if (!gpDefTerm)
+	{
+		DebugStr(asMessage);
+		if (asMessage[lstrlen(asMessage) - 1] != L'\n')
+		{
+			DebugStr(L"\n");
+		}
+		return;
+	}
+
+	LPCWSTR pszReady = asMessage;
+	CEStr lsBuf;
+	if (asLabel && !asLabel)
+	{
+		lsBuf = lstrmerge(asLabel, asMessage);
+		if (lsBuf.ms_Arg)
+			pszReady = lsBuf.ms_Arg;
+	}
+
+	gpDefTerm->LogHookingStatus(pszReady);
+}
+
 
 /* ************ Globals for "Default terminal ************ */
 
@@ -185,12 +237,15 @@ CDefTermHk::CDefTermHk()
 	GetModuleFileName(NULL, szSelfName, countof(szSelfName));
 	lstrcpyn(ms_ExeName, PointToName(szSelfName), countof(ms_ExeName));
 
+	mp_FileLog = NULL;
+
 	mn_LastCheck = 0;
 	ReloadSettings();
 }
 
 CDefTermHk::~CDefTermHk()
 {
+	SafeDelete(mp_FileLog);
 }
 
 void CDefTermHk::StartDefTerm()
@@ -269,16 +324,74 @@ void CDefTermHk::ReloadSettings()
 
 	m_Opt.Serialize();
 	mn_LastCheck = GetTickCount();
+
+	if (m_Opt.bDebugLog)
+	{
+		LogInit();
+	}
+	else
+	{
+		SafeDelete(mp_FileLog);
+	}
+}
+
+void CDefTermHk::LogInit()
+{
+	if (mp_FileLog && mp_FileLog->IsLogOpened())
+		return;
+
+	if (!mp_FileLog)
+	{
+		mp_FileLog = new MFileLog(ms_ExeName);
+		if (!mp_FileLog)
+			return;
+	}
+
+	HRESULT hr = mp_FileLog->CreateLogFile();
+	if (hr != 0)
+	{
+		SafeDelete(mp_FileLog);
+		return;
+	}
+	mp_FileLog->LogString(GetCommandLineW());
+}
+
+void CDefTermHk::LogHookingStatus(LPCWSTR asMessage)
+{
+	if (!mp_FileLog || !mp_FileLog->IsLogOpened())
+	{
+		if (asMessage && *asMessage)
+		{
+			DebugStr(asMessage);
+			if (asMessage[lstrlen(asMessage)-1] != L'\n')
+			{
+				DebugStr(L"\n");
+			}
+		}
+		return;
+	}
+	mp_FileLog->LogString(asMessage);
 }
 
 int CDefTermHk::DisplayLastError(LPCWSTR asLabel, DWORD dwError/*=0*/, DWORD dwMsgFlags/*=0*/, LPCWSTR asTitle/*=NULL*/, HWND hParent/*=NULL*/)
 {
-	DefTermMsg(asLabel);
+	if (dwError)
+	{
+		wchar_t szInfo[64];
+		msprintf(szInfo, countof(szInfo), L", ErrCode=x%X(%i)", dwError, (int)dwError);
+		CEStr lsMsg = lstrmerge(asLabel, szInfo);
+		LogHookingStatus(lsMsg);
+	}
+	else
+	{
+		LogHookingStatus(asLabel);
+	}
 	return 0;
 }
 
 void CDefTermHk::ShowTrayIconError(LPCWSTR asErrText)
 {
+	LogHookingStatus(asErrText);
 	DefTermMsg(asErrText);
 }
 
@@ -287,16 +400,20 @@ HWND CDefTermHk::AllocHiddenConsole(bool bTempForVS)
 	// функция AttachConsole есть только в WinXP и выше
 	AttachConsole_t _AttachConsole = GetAttachConsoleProc();
 	if (!_AttachConsole)
+	{
+		LogHookingStatus(L"Can't create hidden console, function does not exist");
 		return NULL;
+	}
 
-	DefTermMsg(L"AllocHiddenConsole");
+	LogHookingStatus(L"AllocHiddenConsole");
 
 	ReloadSettings();
-	_ASSERTEX(isDefaultTerminalEnabled() && (gbIsNetVsHost || bTempForVS));
+	_ASSERTEX(isDefTermEnabled() && (gbIsNetVsHost || bTempForVS));
 
-	if (!isDefaultTerminalEnabled())
+	if (!isDefTermEnabled())
 	{
 		// Disabled in settings or registry
+		LogHookingStatus(L"Application skipped by settings");
 		return NULL;
 	}
 
@@ -338,8 +455,9 @@ DWORD CDefTermHk::StartConsoleServer(DWORD nAttachPID, bool bNewConWnd, PHANDLE 
 {
 	// Options must be loaded already
 	const CEDefTermOpt* pOpt = GetOpt();
-	if (!pOpt || !isDefaultTerminalEnabled())
+	if (!pOpt || !isDefTermEnabled())
 	{
+		LogHookingStatus(L"Applicatio skipped by settings");
 		return 0;
 	}
 
@@ -390,8 +508,11 @@ DWORD CDefTermHk::StartConsoleServer(DWORD nAttachPID, bool bNewConWnd, PHANDLE 
 			si.dwFlags = STARTF_USESHOWWINDOW;
 		}
 
-		if (CreateProcess(NULL, pszCmdLine, NULL, NULL, FALSE, nCreateFlags, NULL, pOpt->pszConEmuBaseDir, &si, &pi))
+		LogHookingStatus(pszCmdLine);
+
+		if (hkFunc.createProcess(NULL, pszCmdLine, NULL, NULL, FALSE, nCreateFlags, NULL, pOpt->pszConEmuBaseDir, &si, &pi))
 		{
+			LogHookingStatus(L"Console server was successfully created");
 			bAttachCreated = true;
 			if (phSrvProcess)
 				*phSrvProcess = pi.hProcess;
@@ -407,6 +528,7 @@ DWORD CDefTermHk::StartConsoleServer(DWORD nAttachPID, bool bNewConWnd, PHANDLE 
 			if (pszErrMsg)
 			{
 				msprintf(pszErrMsg, MAX_PATH*3, L"ConEmuHk: Failed to start attach server, Err=%u! %s\n", nErr, pszCmdLine);
+				LogHookingStatus(pszErrMsg);
 				wchar_t szTitle[64];
 				msprintf(szTitle, countof(szTitle), WIN3264TEST(L"ConEmuHk",L"ConEmuHk64") L", PID=%u", GetCurrentProcessId());
 				//OutputDebugString(pszErrMsg);
@@ -433,16 +555,18 @@ void CDefTermHk::OnAllocConsoleFinished()
 
 	if (!ghConWnd || !IsWindow(ghConWnd))
 	{
+		LogHookingStatus(L"OnAllocConsoleFinished: ghConWnd must be initialized already!");
 		_ASSERTEX(FALSE && "ghConWnd must be initialized already!");
 		return;
 	}
 
 	ReloadSettings();
-	_ASSERTEX(isDefaultTerminalEnabled() && gbIsNetVsHost);
+	_ASSERTEX(isDefTermEnabled() && gbIsNetVsHost);
 
-	if (!isDefaultTerminalEnabled())
+	if (!isDefTermEnabled())
 	{
 		// Disabled in settings or registry
+		LogHookingStatus(L"OnAllocConsoleFinished: !isDefTermEnabled()");
 		return;
 	}
 
@@ -451,13 +575,13 @@ void CDefTermHk::OnAllocConsoleFinished()
 	_ASSERTEX(bConWasVisible);
 	// Чтобы минимизировать "мелькания" - сразу спрячем его
 	ShowWindow(ghConWnd, SW_HIDE);
-	DefTermMsg(L"Console window hided");
+	LogHookingStatus(L"Console window was hidden");
 
 	if (!StartConsoleServer(gnSelfPID, false, NULL))
 	{
 		if (bConWasVisible)
 			ShowWindow(ghConWnd, SW_SHOW);
-		DefTermMsg(L"Starting attach server failed?");
+		LogHookingStatus(L"Starting attach server failed?");
 	}
 }
 

@@ -40,6 +40,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "common.hpp"
 #include "MArray.h"
 #include "MSectionSimple.h"
+#include "ConEmuCheck.h"
+#include "HkFunc.h"
 #include "WObjects.h"
 #include "WThreads.h"
 #include "../ConEmuCD/ExitCodes.h"
@@ -57,6 +59,7 @@ public:
 	BOOL     bAgressive;
 	BOOL     bNoInjects; // " /NOINJECT"
 	BOOL     bNewWindow; // " /GHWND=NEW"
+	BOOL     bDebugLog;
 	BOOL     nDefaultTerminalConfirmClose; // "Press Enter to close console". 0 - Auto, 1 - Always, 2 - Never | " /CONFIRM" | " /NOCONFIRM"
 	ConEmuConsoleFlags nConsoleFlags; // Used for populating m_SrvMapping in ShellProcessor
 	wchar_t* pszConEmuExe; // Полный путь к ConEmu.exe
@@ -73,6 +76,7 @@ public:
 		bAgressive = FALSE;
 		bNoInjects = FALSE;
 		bNewWindow = FALSE;
+		bDebugLog = FALSE;
 		nDefaultTerminalConfirmClose = 0;
 		nConsoleFlags = CECF_Empty;
 		pszConEmuExe = NULL;
@@ -167,6 +171,7 @@ public:
 			{L"DefTerm-Agressive", &bAgressive, sizeof(bAgressive), REG_DWORD},
 			{L"DefTerm-NoInjects", &bNoInjects, sizeof(bNoInjects), REG_DWORD},
 			{L"DefTerm-NewWindow", &bNewWindow, sizeof(bNewWindow), REG_DWORD},
+			{L"DefTerm-DebugLog",  &bDebugLog,  sizeof(bDebugLog),  REG_DWORD},
 			{L"DefTerm-Confirm",   &nDefaultTerminalConfirmClose, sizeof(nDefaultTerminalConfirmClose), REG_DWORD},
 			{L"DefTerm-Flags",     &nConsoleFlags, sizeof(nConsoleFlags), REG_DWORD},
 			{L"DefTerm-ConEmuExe", &pszConEmuExe, 0, REG_SZ},
@@ -525,9 +530,7 @@ public:
 		bool bNotified = false;
 		HANDLE hProcess = NULL;
 		DWORD nErrCode = 0;
-		#ifdef USEDEBUGSTRDEFTERM
 		wchar_t szInfo[MAX_PATH+80];
-		#endif
 
 
 		if (bRunInThread && (hFore == mh_LastCall))
@@ -627,10 +630,8 @@ public:
 
 		_ASSERTE(isDefaultTerminalAllowed());
 
-		#ifdef USEDEBUGSTRDEFTERM
-		_wsprintf(szInfo, SKIPCOUNT(szInfo) L"DefTerm::CheckForeground x%08X PID=%u <<== trying to set hooks", (DWORD)(DWORD_PTR)hFore, nForePID);
-		DEBUGSTRDEFTERM(szInfo);
-		#endif
+		_wsprintf(szInfo, SKIPCOUNT(szInfo) L"DefTerm::CheckForeground x%08X PID=%u <<== trying to set hooks", LODWORD(hFore), nForePID);
+		LogHookingStatus(szInfo);
 
 		bNotified = NotifyHookingStatus(nForePID, prc.szExeFile[0] ? prc.szExeFile : szClass);
 
@@ -640,6 +641,9 @@ public:
 		iHookerRc = StartDefTermHooker(nForePID, hProcess, nResult, m_Opt.pszConEmuBaseDir, nErrCode);
 
 		ConhostLocker(false, lbConHostLocked);
+
+		_wsprintf(szInfo, SKIPCOUNT(szInfo) L"DefTerm::CheckForeground x%08X PID=%u <<== nResult=%i iHookerRc=%i", LODWORD(hFore), nForePID, nResult, iHookerRc);
+		LogHookingStatus(szInfo);
 
 		if (iHookerRc != 0)
 		{
@@ -662,11 +666,6 @@ public:
 			inf.nHookResult = nResult;
 			m_Processed.push_back(inf);
 		}
-
-		#ifdef USEDEBUGSTRDEFTERM
-		_wsprintf(szInfo, SKIPCOUNT(szInfo) L"DefTerm::CheckForeground x%08X PID=%u <<== nResult=%i iHookerRc=%i", (DWORD)(DWORD_PTR)hFore, nForePID, nResult, iHookerRc);
-		DEBUGSTRDEFTERM(szInfo);
-		#endif
 
 		// And what?
 		if ((nResult == (UINT)CERR_HOOKS_WAS_SET) || (nResult == (UINT)CERR_HOOKS_WAS_ALREADY_SET))
@@ -755,6 +754,7 @@ private:
 		HANDLE hMutex = NULL;
 		wchar_t szMutexName[64];
 		DWORD nMutexCreated = 0;
+		wchar_t szInfo[120];
 
 		nErrCode = 0;
 
@@ -772,6 +772,9 @@ private:
 		{
 			// Failed to hook
 			nErrCode = GetLastError();
+			_wsprintf(szInfo, SKIPCOUNT(szInfo) L"DefTerm[PID=%u]: OpenProcess fails, code=%u", nForePID, nErrCode);
+			LogHookingStatus(szInfo);
+
 			if (nErrCode == ERROR_ACCESS_DENIED)
 			{
 				TODO("Попытаться запустить ConEmuC64 под админом");
@@ -781,9 +784,11 @@ private:
 
 		if (nMutexCreated == ERROR_ALREADY_EXISTS)
 		{
-			// Hooking was started from another process (mostly in agressive mode)
+			// Hooking was started from another process (most probably in agressive mode)
 			iRc = 0;
 			nResult = CERR_HOOKS_WAS_ALREADY_SET;
+			_wsprintf(szInfo, SKIPCOUNT(szInfo) L"DefTerm[PID=%u]: Mutex already exists", nForePID);
+			LogHookingStatus(szInfo);
 			goto wrap;
 		}
 
@@ -807,18 +812,23 @@ private:
 			// Unsupported bitness?
 			CloseHandle(hProcess);
 			iRc = -2;
+			_wsprintf(szInfo, SKIPCOUNT(szInfo) L"DefTerm[PID=%u]: Unsupported process bitness (%i)", nForePID, nBits);
+			LogHookingStatus(szInfo);
 			goto wrap;
 		}
 
 		// Run hooker
 		si.dwFlags = STARTF_USESHOWWINDOW;
-		bStarted = CreateProcess(NULL, szCmdLine, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+		LogHookingStatus(szCmdLine);
+		bStarted = hkFunc.createProcess(NULL, szCmdLine, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
 		if (!bStarted)
 		{
 			//DisplayLastError(L"Failed to start hooking application!\nDefault terminal feature will not be available!");
 			nErrCode = GetLastError();
 			CloseHandle(hProcess);
 			iRc = -3;
+			_wsprintf(szInfo, SKIPCOUNT(szInfo) L"DefTerm[PID=%u]: Fails to start hooking process, code=%u", nForePID, nErrCode);
+			LogHookingStatus(szInfo);
 			goto wrap;
 		}
 		CloseHandle(pi.hThread);
@@ -951,6 +961,12 @@ protected:
 	{
 		// descendant must return true if status bar was changed
 		return false;
+	};
+public:
+	// Messages to be placed in log
+	virtual void LogHookingStatus(LPCWSTR sMessage)
+	{
+		DEBUGSTRDEFTERM(sMessage);
 	};
 
 protected:

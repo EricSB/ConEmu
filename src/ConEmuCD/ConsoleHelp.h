@@ -40,7 +40,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 		L"   or: ConEmuC /AUTOATTACH [/GHWND=NEW|<HWND>]\r\n" \
 		L"   or: ConEmuC /ATTACH /NOCMD\r\n" \
 		L"   or: ConEmuC /ATTACH [/GHWND=NEW|<HWND>] /[FAR|CON|TRM]PID=<PID>\r\n" \
-		L"   or: ConEmuC /GUIMACRO[:PID|HWND][:T<tab>][:S<split>] <GuiMacro command>\r\n" \
+		L"   or: ConEmuC [/SILENT] /GUIMACRO[:PID|HWND][:T<tab>][:S<split>] <GuiMacro command>\r\n" \
 		L"   or: ConEmuC /IsConEmu | /IsAnsi | /IsAdmin | /IsTerm\r\n" \
 		L"   or: ConEmuC /DEBUGPID=<PID>[,<PID2>[,...]] [/DUMP | /MINI | /FULL]\r\n" \
 		L"   or: ConEmuC /DEBUGEXE | /DEBUGTREE <CommandLine>\r\n" \
@@ -112,7 +112,7 @@ _DBGHLP(L"     l - lock console size, do not sync it to ConEmu window\r\n") \
 		L"     t - see below\r\n" \
 _DBGHLP(L"     x<width>, y<height> - change size of visible area, use with 'l'\r\n") \
 		L"     u - ConEmu choose user dialog\r\n" \
-		L"     w - Enable 'Overwrite' mode in command prompt by default\r\n" \
+		L"     w[0] - Enable [disable] 'Overwrite' mode in command prompt by default\r\n" \
 		L"     W - see below\r\n" \
 		L"     z - Don't use 'Default terminal' feature for this command\r\n" \
 		L"\r\n" \

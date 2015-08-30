@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../common/SetEnvVar.h"
 #include "../common/StartupEnvDef.h"
 #include "../common/WConsole.h"
+#include "../common/WConsoleInfo.h"
 #include "../common/WFiles.h"
 #include "../common/WThreads.h"
 #include "../common/WUser.h"
@@ -1116,7 +1117,7 @@ int ServerInit(int anWorkMode/*0-Server,1-AltServer,2-Reserved*/)
 	if (!gpSrv->hConEmuGuiAttached && (!gpSrv->DbgInfo.bDebugProcess || gnConEmuPID || gpSrv->hGuiWnd))
 	{
 		wchar_t szTempName[MAX_PATH];
-		_wsprintf(szTempName, SKIPLEN(countof(szTempName)) CEGUIRCONSTARTED, (DWORD)ghConWnd); //-V205
+		_wsprintf(szTempName, SKIPLEN(countof(szTempName)) CEGUIRCONSTARTED, LODWORD(ghConWnd)); //-V205
 
 		gpSrv->hConEmuGuiAttached = CreateEvent(gpLocalSecurity, TRUE, FALSE, szTempName);
 
@@ -1453,7 +1454,7 @@ int ServerInit(int anWorkMode/*0-Server,1-AltServer,2-Reserved*/)
 		CESERVER_REQ* pOut = ExecuteCmd(szPipe, pIn, GUIATTACH_TIMEOUT, ghConWnd);
 		if (!pOut
 			|| (pOut->hdr.cbSize < (sizeof(CESERVER_REQ_HDR)+sizeof(DWORD)))
-			|| (pOut->dwData[0] != (DWORD)gpSrv->hRootProcessGui))
+			|| (pOut->dwData[0] != LODWORD(gpSrv->hRootProcessGui)))
 		{
 			iRc = CERR_ATTACH_NO_GUIWND;
 		}
@@ -1522,7 +1523,7 @@ void ServerDone(int aiRc, bool abReportShutdown /*= false*/)
 		#endif
 
 		wchar_t szServerPipe[MAX_PATH];
-		_wsprintf(szServerPipe, SKIPLEN(countof(szServerPipe)) CEGUIPIPENAME, L".", (DWORD)ghConEmuWnd); //-V205
+		_wsprintf(szServerPipe, SKIPLEN(countof(szServerPipe)) CEGUIPIPENAME, L".", LODWORD(ghConEmuWnd)); //-V205
 
 		CESERVER_REQ* pIn = ExecuteNewCmd(CECMD_SRVSTARTSTOP, sizeof(CESERVER_REQ_HDR)+sizeof(CESERVER_REQ_SRVSTARTSTOP));
 		if (pIn)
@@ -1793,7 +1794,7 @@ bool CmdOutputOpenMap(CONSOLE_SCREEN_BUFFER_INFO& lsbi, CESERVER_CONSAVE_MAPHDR*
 	if (!gpSrv->pStoredOutputHdr)
 	{
 		gpSrv->pStoredOutputHdr = new MFileMapping<CESERVER_CONSAVE_MAPHDR>;
-		gpSrv->pStoredOutputHdr->InitName(CECONOUTPUTNAME, (DWORD)ghConWnd); //-V205
+		gpSrv->pStoredOutputHdr->InitName(CECONOUTPUTNAME, LODWORD(ghConWnd)); //-V205
 		if (!(pHdr = gpSrv->pStoredOutputHdr->Create()))
 		{
 			_ASSERTE(FALSE && "Failed to create mapping: CESERVER_CONSAVE_MAPHDR");
@@ -1864,7 +1865,7 @@ bool CmdOutputOpenMap(CONSOLE_SCREEN_BUFFER_INFO& lsbi, CESERVER_CONSAVE_MAPHDR*
 
 		if (lbNeedReopen || lbNeedRecreate || !gpSrv->pStoredOutputItem->IsValid())
 		{
-			LPCWSTR pszName = gpSrv->pStoredOutputItem->InitName(CECONOUTPUTITEMNAME, (DWORD)ghConWnd, nNewIndex); //-V205
+			LPCWSTR pszName = gpSrv->pStoredOutputItem->InitName(CECONOUTPUTITEMNAME, LODWORD(ghConWnd), nNewIndex); //-V205
 			DWORD nMaxSize = sizeof(*pData) + cchMaxBufferSize * sizeof(pData->Data[0]);
 
 			if (!(pData = gpSrv->pStoredOutputItem->Create(nMaxSize)))
@@ -2136,7 +2137,7 @@ HWND FindConEmuByPID(DWORD anSuggestedGuiPID /*= 0*/)
 	// В большинстве случаев PID GUI передан через параметры
 	if (nConEmuPID == 0)
 	{
-		// GUI может еще "висеть" в ожидании или в отладчике, так что пробуем и через Snapshoot
+		// GUI может еще "висеть" в ожидании или в отладчике, так что пробуем и через Snapshot
 		HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
 
 		if (hSnap != INVALID_HANDLE_VALUE)
@@ -2284,7 +2285,7 @@ void CheckConEmuHwnd()
 		SendStarted(); // Он и окно проверит, и параметры перешлет и размер консоли скорректирует
 	}
 
-	// GUI может еще "висеть" в ожидании или в отладчике, так что пробуем и через Snapshoot
+	// GUI может еще "висеть" в ожидании или в отладчике, так что пробуем и через Snapshot
 	if (ghConEmuWnd == NULL)
 	{
 		ghConEmuWnd = FindConEmuByPID();
@@ -2311,7 +2312,7 @@ void CheckConEmuHwnd()
 				hBack = FindWindowEx(ghConEmuWnd, hBack, VirtualConsoleClassBack, NULL);
 				if (!hBack)
 					break;
-				if (GetWindowLong(hBack, 0) == (LONG)(DWORD)ghConWnd)
+				if (GetWindowLong(hBack, 0) == LOLONG(ghConWnd))
 				{
 					hDc = (HWND)(DWORD)GetWindowLong(hBack, 4);
 					if (IsWindow(hDc) && GetClassName(hDc, szClass, countof(szClass) && !lstrcmp(szClass, VirtualConsoleClass)))
@@ -2433,7 +2434,7 @@ bool TryConnect2Gui(HWND hGui, DWORD anGuiPID, CESERVER_REQ* pIn)
 	wchar_t szServerPipe[64];
 	if (hGui)
 	{
-		_wsprintf(szServerPipe, SKIPLEN(countof(szServerPipe)) CEGUIPIPENAME, L".", (DWORD)hGui); //-V205
+		_wsprintf(szServerPipe, SKIPLEN(countof(szServerPipe)) CEGUIPIPENAME, L".", LODWORD(hGui)); //-V205
 	}
 	else if (anGuiPID)
 	{
@@ -3153,8 +3154,8 @@ int CreateMapHeader()
 		goto wrap;
 	}
 
-	gpSrv->pConsoleMap->InitName(CECONMAPNAME, (DWORD)ghConWnd); //-V205
-	gpSrv->pAppMap->InitName(CECONAPPMAPNAME, (DWORD)ghConWnd); //-V205
+	gpSrv->pConsoleMap->InitName(CECONMAPNAME, LODWORD(ghConWnd)); //-V205
+	gpSrv->pAppMap->InitName(CECONAPPMAPNAME, LODWORD(ghConWnd)); //-V205
 
 	if (gnRunMode == RM_SERVER)
 	{
@@ -3448,7 +3449,7 @@ int CreateColorerHeader(bool bForceRecreate /*= false*/)
 		gpSrv->pColorerMapping = new MFileMapping<const AnnotationHeader>;
 	}
 	// Задать имя для mapping, если надо - сам сделает CloseMap();
-	gpSrv->pColorerMapping->InitName(AnnotationShareName, (DWORD)sizeof(AnnotationInfo), (DWORD)lhConWnd); //-V205
+	gpSrv->pColorerMapping->InitName(AnnotationShareName, (DWORD)sizeof(AnnotationInfo), LODWORD(lhConWnd)); //-V205
 
 	//_wsprintf(szMapName, SKIPLEN(countof(szMapName)) AnnotationShareName, sizeof(AnnotationInfo), (DWORD)lhConWnd);
 	//gpSrv->hColorerMapping = CreateFileMapping(INVALID_HANDLE_VALUE,
@@ -3465,6 +3466,10 @@ int CreateColorerHeader(bool bForceRecreate /*= false*/)
 	// Заголовок мэппинга содержит информацию о размере, нужно заполнить!
 	//AnnotationHeader* pHdr = (AnnotationHeader*)MapViewOfFile(gpSrv->hColorerMapping, FILE_MAP_ALL_ACCESS,0,0,0);
 	// 111101 - было "Create(nMapSize);"
+
+	// AnnotationShareName is CREATED in ConEmu.exe
+	// May be it would be better, to avoid hooking and cycling (minhook),
+	// call CreateFileMapping instead of OpenFileMapping...
 	pHdr = gpSrv->pColorerMapping->Open();
 
 	if (!pHdr)
@@ -3569,7 +3574,7 @@ void InitAnsiLog(const ConEmuAnsiLog& AnsiLog)
 	int nNameLen = lstrlen(szName);
 	lstrcpyn(szPath, pszExp ? pszExp : AnsiLog.Path, countof(szPath)-nNameLen);
 	int nLen = lstrlen(szPath);
-	if (szPath[nLen-1] != L'\\')
+	if ((nLen >= 1) && (szPath[nLen-1] != L'\\'))
 		szPath[nLen++] = L'\\';
 	if (!DirectoryExists(szPath))
 	{
@@ -4598,6 +4603,12 @@ DWORD WINAPI RefreshThread(LPVOID lpvParam)
 		// 120507 - Если крутится альт.сервер - то игнорировать
 		if (!nAltWait && (gpSrv->nRequestChangeSize > 0))
 		{
+			if (gpSrv->bStationLocked)
+			{
+				LogString("!!! Change size request received while station is LOCKED !!!");
+				_ASSERTE(!gpSrv->bStationLocked);
+			}
+
 			InterlockedDecrement(&gpSrv->nRequestChangeSize);
 			// AVP гундит... да вроде и не нужно
 			//DWORD dwSusp = 0, dwSuspErr = 0;
@@ -4607,7 +4618,7 @@ DWORD WINAPI RefreshThread(LPVOID lpvParam)
 			//	dwSusp = SuspendThread(gpSrv->hRootThread);
 			//	if (dwSusp == (DWORD)-1) dwSuspErr = GetLastError();
 			//}
-			SetConsoleSize(gpSrv->nReqSizeBufferHeight, gpSrv->crReqSizeNewSize, gpSrv->rReqSizeNewRect, gpSrv->sReqSizeLabel);
+			SetConsoleSize(gpSrv->nReqSizeBufferHeight, gpSrv->crReqSizeNewSize, gpSrv->rReqSizeNewRect, gpSrv->sReqSizeLabel, gpSrv->bReqSizeForceLog);
 			//if (gpSrv->hRootThread) {
 			//	ResumeThread(gpSrv->hRootThread);
 			//}
@@ -4622,6 +4633,18 @@ DWORD WINAPI RefreshThread(LPVOID lpvParam)
 		// Функция срабатывает только через интервал CHECK_PROCESSES_TIMEOUT (внутри защита от частых вызовов)
 		// #define CHECK_PROCESSES_TIMEOUT 500
 		CheckProcessCount();
+
+		// While station is locked - no sense to scan console contents
+		if (gpSrv->bStationLocked)
+		{
+			nWait = WaitForSingleObject(ghQuitEvent, 50);
+			if (nWait == WAIT_OBJECT_0)
+			{
+				break; // Server stop was requested
+			}
+			// Skip until station will be unlocked
+			continue;
+		}
 
 		// Подождать немножко
 		if (gpSrv->nMaxFPS>0)
@@ -4662,14 +4685,28 @@ DWORD WINAPI RefreshThread(LPVOID lpvParam)
 
 			if (gpSrv->bFarCommitRegistered)
 			{
-				nFarCommit = nEvtCount;
-				hEvents[nEvtCount++] = gpSrv->hFarCommitEvent;
-				nWaitTimeout = 2500; // No need to force console scanning, Far & ExtendedConsole.dll takes care
+				if (nEvtCount < countof(hEvents))
+				{
+					nFarCommit = nEvtCount;
+					hEvents[nEvtCount++] = gpSrv->hFarCommitEvent;
+					nWaitTimeout = 2500; // No need to force console scanning, Far & ExtendedConsole.dll takes care
+				}
+				else
+				{
+					_ASSERTE(nEvtCount < countof(hEvents));
+				}
 			}
 			if (gpSrv->bCursorChangeRegistered)
 			{
-				nCursorChanged = nEvtCount;
-				hEvents[nEvtCount++] = gpSrv->hCursorChangeEvent;
+				if (nEvtCount < countof(hEvents))
+				{
+					nCursorChanged = nEvtCount;
+					hEvents[nEvtCount++] = gpSrv->hCursorChangeEvent;
+				}
+				else
+				{
+					_ASSERTE(nEvtCount < countof(hEvents));
+				}
 			}
 
 			nWait = WaitForMultipleObjects(nEvtCount, hEvents, FALSE, nWaitTimeout);

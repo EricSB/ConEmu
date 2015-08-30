@@ -28,6 +28,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
 
+#include <wchar.h>
+#include <tchar.h>
+#include "MAssert.h"
+
 #define STRSAFE_NO_DEPRECATE
 
 // В некоторых случаях использовать StringCch и прочие нельзя
@@ -40,8 +44,6 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endif
 
 
-
-//#define MSTRSAFE_NO_DEPRECATE
 
 #ifdef STRSAFE_DISABLE
 	#define StringCchCopyA(d,n,s) lstrcpyA(d,s)
@@ -182,7 +184,31 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define _getts      gets
 #endif
 
-#endif // MSTRSAFE_NO_DEPRECATE
+#else // STRSAFE_NO_DEPRECATE
+
+#if defined(__CYGWIN__)
+	// bug: Cygwin's tchar.h
+	#define __T(x) L ## x
+	#define _T(x) __T(x)
+	#define _tcslen wcslen
+	#define _tcscmp wcscmp
+	#define _tcsstr wcsstr
+	#define _tcsrchr wcsrchr
+	#define _tcsncmp wcsncmp
+	#define _tcscpy wcscpy
+	// WARNING!!! Precision lose
+	#define _wcstoui64 wcstoul
+	// Some other absent defines
+	#define wmemmove_s(dest,numberOfElements,src,count) wmemmove(dest,src,count)
+	wchar_t* _itow(int value, wchar_t *str, int radix);
+	#define _ltow _itow
+	int _wtoi(const wchar_t *str);
+	#define _wtol _wtoi
+	#define _strnicmp lstrcmpni
+	#define _tcsncpy(d,s,l) lstrcpyn(d,s,l)
+#endif
+
+#endif // STRSAFE_NO_DEPRECATE
 
 
 #ifndef _DEBUG
@@ -198,7 +224,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 
-#if defined(_DEBUG) && !defined(STRSAFE_DISABLE)
+#if defined(_DEBUG) && !defined(STRSAFE_DISABLE) && !defined(__GNUC__)
+// buggy with L" %c %s[%u%s]" in MinGW build
 // Только под дебагом, т.к. StringCchVPrintf вызывает vsprintf, который не линкуется в релизе статиком.
 #define SKIPLEN(l) (l),
 #define SKIPCOUNT(l) (countof(l)),
@@ -331,6 +358,7 @@ int wcscat_c(wchar_t (&Dst)[size], const wchar_t *Src)
 LPCWSTR msprintf(LPWSTR lpOut, size_t cchOutMax, LPCWSTR lpFmt, ...);
 LPCSTR msprintf(LPSTR lpOut, size_t cchOutMax, LPCSTR lpFmt, ...);
 
+int lstrcmpni(LPCSTR asStr1, LPCSTR asStr2, int cchMax);
 int lstrcmpni(LPCWSTR asStr1, LPCWSTR asStr2, int cchMax);
 int startswith(LPCWSTR asStr, LPCWSTR asPattern, bool abIgnoreCase);
 

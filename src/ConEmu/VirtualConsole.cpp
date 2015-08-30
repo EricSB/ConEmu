@@ -235,7 +235,7 @@ bool CVirtualConsole::SetFlags(VConFlags Set, VConFlags Mask, int index)
 		bChanged = true;
 	}
 
-	if ((index > 0) && (index != mn_Index))
+	if ((index >= 0) && (index != mn_Index))
 	{
 		mn_Index = index;
 	}
@@ -294,10 +294,11 @@ bool CVirtualConsole::Constructor(RConStartArgs *args)
 	// Эти переменные устанавливаются в TRUE, если при следующем Redraw нужно обновить размер панелей
 	mb_LeftPanelRedraw = mb_RightPanelRedraw = FALSE;
 	mn_LastDialogsCount = 0;
-	memset(mrc_LastDialogs, 0, sizeof(mrc_LastDialogs));
+	ZeroStruct(mn_LastDialogFlags);
+	ZeroStruct(mrc_LastDialogs);
 	mn_DialogsCount = 0; mn_DialogAllFlags = 0;
-	memset(mrc_Dialogs, 0, sizeof(mrc_Dialogs));
-	memset(mn_DialogFlags, 0, sizeof(mn_DialogFlags));
+	ZeroStruct(mrc_Dialogs);
+	ZeroStruct(mn_DialogFlags);
 	//InitializeCriticalSection(&csDC); ncsTDC = 0;
 	//mb_PaintRequested = FALSE;
 	//mb_PaintLocked = FALSE;
@@ -311,15 +312,24 @@ bool CVirtualConsole::Constructor(RConStartArgs *args)
 	mb_ConDataChanged = false;
 	mh_TransparentRgn = NULL;
 	mb_ChildWindowWasFound = false;
-#ifdef _DEBUG
-	mn_BackColorIdx = 2; // Green
-#else
-	mn_BackColorIdx = 0; // Black
-#endif
-	memset(&Cursor, 0, sizeof(Cursor));
+	mn_BackColorIdx = RELEASEDEBUGTEST(0/*Black*/,2/*Green*/);
+	ZeroStruct(Cursor);
 	Cursor.nBlinkTime = GetCaretBlinkTime();
 	TextWidth = TextHeight = Width = Height = nMaxTextWidth = nMaxTextHeight = 0;
 	LastPadSize = 0;
+	mb_PaintSkippedLogged = false;
+
+	isForce = true;
+	isFontSizeChanged = true;
+	ZeroStruct(mrc_Client);
+	ZeroStruct(mrc_Back);
+	ZeroStruct(mrc_UCharMap);
+	attrBackLast = 0;
+	mn_LogScreenIdx = 0;
+	isCursorValid = true;
+	drawImage = true;
+	textChanged = true;
+	attrChanged = true;
 
 	_ASSERTE((HDC)m_DC == NULL);
 	hBgDc = NULL; bgBmpSize.X = bgBmpSize.Y = 0;
@@ -876,8 +886,8 @@ bool CVirtualConsole::Dump(LPCWSTR asFile)
 	LPCTSTR pszTitle = mp_ConEmu->GetLastTitle();
 	WriteFile(hFile, pszTitle, _tcslen(pszTitle)*sizeof(*pszTitle), &dw, NULL);
 	wchar_t temp[100];
-	swprintf(temp, _T("\r\nSize: %ix%i   Cursor: %ix%i\r\n"), TextWidth, TextHeight, Cursor.x, Cursor.y);
-	WriteFile(hFile, temp, _tcslen(temp)*sizeof(wchar_t), &dw, NULL);
+	_wsprintf(temp, SKIPCOUNT(temp) L"\r\nSize: %ix%i   Cursor: %ix%i\r\n", TextWidth, TextHeight, Cursor.x, Cursor.y);
+	WriteFile(hFile, temp, wcslen(temp)*sizeof(wchar_t), &dw, NULL);
 	WriteFile(hFile, mpsz_ConChar, TextWidth * TextHeight * sizeof(*mpsz_ConChar), &dw, NULL);
 	WriteFile(hFile, mpn_ConAttrEx, TextWidth * TextHeight * sizeof(*mpn_ConAttrEx), &dw, NULL);
 	WriteFile(hFile, mpsz_ConCharSave, TextWidth * TextHeight * sizeof(*mpsz_ConCharSave), &dw, NULL);
@@ -2588,7 +2598,7 @@ bool CVirtualConsole::LoadConsoleData()
 					}
 				}
 
-				// Шрифт создали, теперь - пометить соответсвующий регион для использования этого шрифта
+				// Шрифт создали, теперь - пометить соответствующий регион для использования этого шрифта
 				if (mh_UCharMapFont)
 				{
 					for(int Y = rcGlyph.Top; Y <= rcGlyph.Bottom; Y++)
@@ -4641,7 +4651,12 @@ bool CVirtualConsole::UpdateCursorGroup(CVirtualConsole* pVCon, LPARAM lParam)
 
 void CVirtualConsole::UpdateCursor(bool& lRes)
 {
-	if (mp_RCon && mp_RCon->GuiWnd())
+	if (!this || !mp_RCon)
+	{
+		return; // Exceptional
+	}
+
+	if (mp_RCon->GuiWnd())
 	{
 		// В GUI режиме VirtualConsole скрыта под GUI окном и видна только при "включении" BufferHeight
 		if (!mp_RCon->isBufferHeight())
@@ -4649,6 +4664,12 @@ void CVirtualConsole::UpdateCursor(bool& lRes)
 			lRes = false;
 			return;
 		}
+	}
+
+	if (mp_RCon->isMouseSelectionPresent())
+	{
+		// TextCursor is not shown during *mouse* selection
+		return;
 	}
 
 	// указатель на настройки разделяемые по приложениям
@@ -4942,10 +4963,17 @@ void CVirtualConsole::PaintVCon(HDC hPaintDc)
 	}
 	else if (gpConEmu->IsWindowModeChanging())
 	{
-		LogString(L"PaintVCon skipped due to Min/Max/Restore");
+		if (!mb_PaintSkippedLogged)
+		{
+			mb_PaintSkippedLogged = true;
+			LogString(L"PaintVCon are skipped till Min/Max/Restore/Lock end");
+		}
 	}
 	else
 	{
+		if (mb_PaintSkippedLogged)
+			mb_PaintSkippedLogged = false;
+
 		PaintVConNormal(hPaintDc, rcClient);
 
 		if (mp_Ghost)
@@ -5240,7 +5268,7 @@ void CVirtualConsole::PaintVConDebug(HDC hPaintDc, RECT rcClient)
 		#ifdef DEBUGDRAW_RCONPOS
 		if (GetKeyState(DEBUGDRAW_RCONPOS) & 1)
 		{
-			// Прямоугольник, соответвующий положения окна RealConsole
+			// Прямоугольник, соответствующий положению окна RealConsole
 			HWND hConWnd = mp_RCon->hConWnd;
 			RECT rcCon; GetWindowRect(hConWnd, &rcCon);
 			MapWindowPoints(NULL, GetView(), (LPPOINT)&rcCon, 2);

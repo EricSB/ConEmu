@@ -185,6 +185,8 @@ bool CRealConsole::Construct(CVirtualConsole* apVCon, RConStartArgs *args)
 			_ASSERTE(!CConEmuMain::IsConsoleBatchOrTask(lsFirstTemp));
 		}
 	}
+	// Add check for un-processed working directory
+	_ASSERTE(args && (!args->pszStartupDir || args->pszStartupDir[0]!=L'%'));
 	#endif
 	MCHKHEAP;
 
@@ -525,6 +527,10 @@ CRealConsole::~CRealConsole()
 	//	delete mp_Rgn;
 	//	mp_Rgn = NULL;
 	//}
+	SafeCloseHandle(mh_ApplyFinished);
+	SafeCloseHandle(mh_UpdateServerActiveEvent);
+	SafeCloseHandle(mh_MonitorThreadEvent);
+	SafeDelete(mp_Files);
 	MCHKHEAP;
 }
 
@@ -1002,6 +1008,52 @@ bool CRealConsole::SetActiveBuffer(CRealBuffer* aBuffer, bool abTouchMonitorEven
 	}
 
 	return true;
+}
+
+void CRealConsole::DoLockUnlock(bool bLock)
+{
+	DWORD nServerPID = GetServerPID(true);
+	if (!nServerPID)
+		return;
+
+	wchar_t szInfo[80];
+	CESERVER_REQ *pIn = NULL, *pOut = NULL;
+
+	if (bLock)
+	{
+		_wsprintf(szInfo, SKIPCOUNT(szInfo) L"RCon ID=%i is locking", mp_VCon->ID());
+		mp_ConEmu->LogString(szInfo);
+
+		pIn = ExecuteNewCmd(CECMD_LOCKSTATION, sizeof(CESERVER_REQ_HDR));
+		if (pIn)
+		{
+			pOut = ExecuteSrvCmd(nServerPID, pIn, ghWnd);
+		}
+	}
+	else
+	{
+		RECT rcCon = mp_ConEmu->CalcRect(CER_CONSOLE_CUR, mp_VCon);
+
+		_wsprintf(szInfo, SKIPCOUNT(szInfo) L"RCon ID=%i is unlocking, NewSize={%i,%i}", mp_VCon->ID(), rcCon.right, rcCon.bottom);
+		mp_ConEmu->LogString(szInfo);
+
+		// Don't call SetConsoleSize to avoid skipping server calls due optimization
+		pIn = ExecuteNewCmd(CECMD_UNLOCKSTATION, sizeof(CESERVER_REQ_HDR)+sizeof(CESERVER_REQ_SETSIZE));
+		if (pIn)
+		{
+			pIn->SetSize.size = MakeCoord(rcCon.right, rcCon.bottom);
+			pIn->SetSize.nBufferHeight = mp_RBuf->BufferHeight(0);
+			pOut = ExecuteSrvCmd(nServerPID, pIn, ghWnd);
+		}
+	}
+
+	if (pOut)
+	{
+		SetConStatus(bLock ? L"LOCKED" : NULL);
+	}
+
+	ExecuteFreeResult(pIn);
+	ExecuteFreeResult(pOut);
 }
 
 BOOL CRealConsole::SetConsoleSize(USHORT sizeX, USHORT sizeY, USHORT sizeBuffer, DWORD anCmdID/*=CECMD_SETSIZESYNC*/)
@@ -2794,6 +2846,12 @@ DWORD CRealConsole::MonitorThreadWorker(bool bDetached, bool& rbChildProcessCrea
 				ShowOtherWindow(hConWnd, SW_HIDE);
 		}
 
+		// Ensure that window data match hConWnd - some external app may damage it
+		if (hConWnd)
+		{
+			CheckVConRConPointer(false);
+		}
+
 		// Размер консоли меняем в том треде, в котором это требуется. Иначе можем заблокироваться при Update (InitDC)
 		// Требуется изменение размеров консоли
 		/*if (nWait == (IDEVENT_SYNC2WINDOW)) {
@@ -3186,6 +3244,8 @@ DWORD CRealConsole::MonitorThreadWorker(bool bDetached, bool& rbChildProcessCrea
 					// UpdateCursor Invalidate не зовет
 					if (lbNeedBlink)
 					{
+						DEBUGSTRDRAW(L"+++ Force invalidate by lbNeedBlink\n");
+
 						if (m_UseLogs>2) LogString("Invalidating from CRealConsole::MonitorThread.1");
 
 						lbNeedRedraw = true;
@@ -4435,14 +4495,16 @@ BOOL CRealConsole::StartProcessInt(LPCWSTR& lpszCmd, wchar_t*& psCurCmd, LPCWSTR
 		_wcscat_c(psCurCmd, nLen, L"/SKIPHOOKERS ");
 	}
 
-	if ((gpSet->nConInMode != (DWORD)-1) || (m_Args.OverwriteMode == crb_On))
+	// Console modes (insert/overwrite)
 	{
-		DWORD nMode = (gpSet->nConInMode != (DWORD)-1) ? gpSet->nConInMode : 0;
+		DWORD nMode =
+			// (gpSet->nConInMode != (DWORD)-1) ? gpSet->nConInMode : 0
+			(ENABLE_INSERT_MODE << 16) // Mask for insert/overwrite mode
+			;
 		if (m_Args.OverwriteMode == crb_On)
-		{
-			nMode |= (ENABLE_INSERT_MODE << 16); // Mask
-			nMode &= ~ENABLE_INSERT_MODE; // Turn bit OFF
-		}
+			nMode &= ~ENABLE_INSERT_MODE; // Turn bit OFF (Overwrite mode). Yep, it's NOP, but here for compatibility and clearness.
+		else
+			nMode |= ENABLE_INSERT_MODE; // Turn bit ON (Insert mode)
 
 		nCurLen = _tcslen(psCurCmd);
 		_wsprintf(psCurCmd+nCurLen, SKIPLEN(nLen-nCurLen) L" /CINMODE=%X ", nMode);
@@ -4675,15 +4737,13 @@ BOOL CRealConsole::CreateOrRunAs(CRealConsole* pRCon, RConStartArgs& Args,
 				SafeFree(pp_sei);
 			}
 
-			wchar_t szCurrentDirectory[MAX_PATH+1];
-			wcscpy(szCurrentDirectory, lpszWorkDir);
-
+			INT_PTR iDirLen = (lpszWorkDir ? _tcslen(lpszWorkDir) : 0);
 			int nWholeSize = sizeof(SHELLEXECUTEINFO)
 				                + sizeof(wchar_t) *
 				                (10  /* Verb */
 				                + _tcslen(szExec)+2
 				                + ((pszCmd == NULL) ? 0 : (_tcslen(pszCmd)+2))
-				                + _tcslen(szCurrentDirectory) + 2
+				                + iDirLen + 2
 				                );
 			pp_sei = (SHELLEXECUTEINFO*)calloc(nWholeSize, 1);
 			pp_sei->cbSize = sizeof(SHELLEXECUTEINFO);
@@ -4709,8 +4769,8 @@ BOOL CRealConsole::CreateOrRunAs(CRealConsole* pRCon, RConStartArgs& Args,
 
 			pp_sei->lpDirectory = pp_sei->lpParameters + _tcslen(pp_sei->lpParameters) + 2;
 
-			if (szCurrentDirectory[0])
-				wcscpy((wchar_t*)pp_sei->lpDirectory, szCurrentDirectory);
+			if (lpszWorkDir && *lpszWorkDir)
+				_wcscpy_c((wchar_t*)pp_sei->lpDirectory, iDirLen+1, lpszWorkDir);
 			else
 				pp_sei->lpDirectory = NULL;
 
@@ -8072,12 +8132,12 @@ BOOL CRealConsole::ProcessUpdate(const DWORD *apPID, UINT anCount)
 		{
 			DWORD dwErr = GetLastError();
 			wchar_t szError[255];
-			_wsprintf(szError, SKIPLEN(countof(szError)) L"Can't create process snapshoot, ErrCode=0x%08X", dwErr);
+			_wsprintf(szError, SKIPLEN(countof(szError)) L"Can't create process snapshot, ErrCode=0x%08X", dwErr);
 			mp_ConEmu->DebugStep(szError);
 		}
 		else
 		{
-			//Snapshoot создан, поехали
+			//Snapshot создан, поехали
 			// Перед добавлением нового - поставить пометочку на все процессы, вдруг кто уже убился
 			for (INT_PTR ii = 0; ii < m_Processes.size(); ii++)
 			{
@@ -8700,9 +8760,7 @@ void CRealConsole::SetHwnd(HWND ahConWnd, BOOL abForceApprove /*= FALSE*/)
 	}
 
 	hConWnd = ahConWnd;
-	SetWindowLongPtr(mp_VCon->GetView(), 0, (LONG_PTR)ahConWnd);
-	SetWindowLong(mp_VCon->GetBack(), 0, LODWORD(ahConWnd));
-	SetWindowLong(mp_VCon->GetBack(), 4, LODWORD(mp_VCon->GetView()));
+	CheckVConRConPointer(true);
 	//if (mb_Detached && ahConWnd) // Не сбрасываем, а то нить может не успеть!
 	//  mb_Detached = FALSE; // Сброс флажка, мы уже подключились
 	//OpenColorMapping();
@@ -8742,6 +8800,32 @@ void CRealConsole::SetHwnd(HWND ahConWnd, BOOL abForceApprove /*= FALSE*/)
 		// StatusBar
 		mp_ConEmu->mp_Status->OnActiveVConChanged(mp_ConEmu->ActiveConNum(), this);
 	}
+}
+
+void CRealConsole::CheckVConRConPointer(bool bForceSet)
+{
+	if (!this)
+		return;
+
+	_ASSERTE(hConWnd != NULL);
+	HWND hVCon = mp_VCon->GetView();
+	HWND hVConBack = mp_VCon->GetBack();
+
+	HWND hCurrent = (HWND)INVALID_HANDLE_VALUE;
+	if (!bForceSet)
+	{
+		hCurrent = (HWND)GetWindowLongPtr(hVCon, 0);
+		if (hCurrent == hConWnd)
+			return; // OK, was not changed externally
+		if (isServerClosing())
+			return; // Skip - server is already in the shutdown state
+		_ASSERTE(FALSE && "WindowLongPtr was changed externally?");
+	}
+
+	SetWindowLongPtr(hVCon, 0, (LONG_PTR)hConWnd);
+
+	SetWindowLong(hVConBack, 0, LODWORD(hConWnd));
+	SetWindowLong(hVConBack, 4, LODWORD(hVCon));
 }
 
 void CRealConsole::OnFocus(BOOL abFocused)
@@ -8790,15 +8874,19 @@ void CRealConsole::CreateLogFiles()
 		mp_Log = new MFileLog(L"ConEmu-input", mp_ConEmu->ms_ConEmuExeDir, mn_MainSrv_PID);
 	}
 
+	wchar_t szInfo[MAX_PATH * 2];
+
 	HRESULT hr = mp_Log ? mp_Log->CreateLogFile(L"ConEmu-input", mn_MainSrv_PID, gpSetCls->isAdvLogging) : E_UNEXPECTED;
 	if (hr != 0)
 	{
-		wchar_t szError[MAX_PATH*2];
-		_wsprintf(szError, SKIPLEN(countof(szError)) L"Create log file failed! ErrCode=0x%08X\n%s\n", (DWORD)hr, mp_Log->GetLogFileName());
-		MBoxA(szError);
+		_wsprintf(szInfo, SKIPCOUNT(szInfo) L"Create log file failed! ErrCode=0x%08X\n%s\n", (DWORD)hr, mp_Log->GetLogFileName());
+		MBoxA(szInfo);
 		SafeDelete(mp_Log);
 		return;
 	}
+
+	_wsprintf(szInfo, SKIPCOUNT(szInfo) L"RCon ID=%i started", mp_VCon->ID());
+	mp_Log->LogString(szInfo);
 
 	//mp_Log->LogStartEnv(gpStartEnv);
 
@@ -9525,14 +9613,17 @@ BOOL CRealConsole::SetOtherWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, int
 		mp_ConEmu->LogString(sInfo);
 	}
 
-
-	BOOL lbRc = SetWindowPos(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
+	BOOL lbRc = FALSE; DWORD dwErr = ERROR_ACCESS_DENIED/*5*/;
+	// It'll be better to show console window from server threads
+	if (hWnd == this->hConWnd)
+	{
+		lbRc = SetWindowPos(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
+		dwErr = GetLastError();
+	}
 
 	if (!lbRc)
 	{
-		DWORD dwErr = GetLastError();
-
-		if (dwErr == 5 /*E_access*/)
+		if (dwErr == ERROR_ACCESS_DENIED/*5*/)
 		{
 			CESERVER_REQ in;
 			ExecutePrepareCmd(&in, CECMD_SETWINDOWPOS, sizeof(CESERVER_REQ_HDR) + sizeof(CESERVER_REQ_SETWINDOWPOS));
@@ -14230,7 +14321,7 @@ LPCWSTR CRealConsole::GetFileFromConsole(LPCWSTR asSrc, CmdArg& szFull)
 bool CRealConsole::ReloadFarWorkDir()
 {
 	DWORD nFarPID = GetFarPID(true);
-	if (!nFarPID != NULL)
+	if (!nFarPID)
 		return false;
 
 	bool bChanged = false;
@@ -15343,9 +15434,9 @@ bool CRealConsole::Detach(bool bPosted /*= false*/, bool bSendCloseConsole /*= f
 		//// Закрыть консоль
 		//CloseConsole(false, false);
 
-		// Уведомить сервер, что нужно закрыться
+		// Inform server about close
 		CESERVER_REQ* pIn = ExecuteNewCmd(CECMD_DETACHCON, sizeof(CESERVER_REQ_HDR)+2*sizeof(DWORD));
-		pIn->dwData[0] = (DWORD)lhGuiWnd;
+		pIn->dwData[0] = LODWORD(lhGuiWnd); // HWND handles can't be larger than DWORD to not harm 32bit apps
 		pIn->dwData[1] = bSendCloseConsole;
 		DWORD dwTickStart = timeGetTime();
 

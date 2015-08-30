@@ -40,15 +40,18 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "MFileLog.h"
 #include "MSectionSimple.h"
 #include "WObjects.h"
-#include "StartupEnvEx.h"
 #include "../ConEmu/version.h"
 #pragma warning(disable: 4091)
 #include <shlobj.h>
 
+#if !defined(CONEMU_MINIMAL)
+#include "StartupEnvEx.h"
+#endif
+
 #ifdef _DEBUG
 #define DebugString(x) //OutputDebugString(x)
 #define DebugStringA(x) //OutputDebugStringA(x)
-#define DEBUGSTRLOG(x) //OutputDebugStringA(x)
+#define DEBUGSTRLOG(x) OutputDebugStringA(x)
 #else
 #define DebugString(x) //OutputDebugString(x)
 #define DebugStringA(x) //OutputDebugStringA(x)
@@ -82,30 +85,6 @@ HRESULT MFileLog::InitFileName(LPCWSTR asName /*= NULL*/, DWORD anPID /*= 0*/)
 	_wsprintf(ms_FileName, SKIPLEN(cchMax) L"%s-%u.log", asName, anPID);
 
 	return S_OK;
-
-	//wchar_t szTemp[MAX_PATH]; szTemp[0] = 0;
-	//GetTempPath(MAX_PATH-16, szTemp);
-
-	//if (!asDir || !*asDir)
-	//{
-	//	wcscat_c(szTemp, L"ConEmuLog");
-	//	CreateDirectoryW(szTemp, NULL);
-	//	wcscat_c(szTemp, L"\\");
-	//	asDir = szTemp;
-	//}
-
-	//int nDirLen = lstrlenW(asDir);
-	//wchar_t szFile[MAX_PATH*2];
-	//_wsprintf(szFile, SKIPLEN(countof(szFile)) L"%s-%u.log", asName ? asName : L"LogFile", anPID);
-	//int nFileLen = lstrlenW(szFile);
-	//int nCchMax = nDirLen+nFileLen+3;
-	//ms_FilePathName = (wchar_t*)calloc(nCchMax,2);
-	//_wcscpy_c(ms_FilePathName, nCchMax, asDir);
-
-	//if (nDirLen > 0 && ms_FilePathName[nDirLen-1] != L'\\')
-	//	_wcscat_c(ms_FilePathName, nCchMax, L"\\");
-
-	//_wcscat_c(ms_FilePathName, nCchMax, szFile);
 }
 
 MFileLog::~MFileLog()
@@ -113,6 +92,11 @@ MFileLog::~MFileLog()
 	CloseLogFile();
 	SafeFree(ms_DefPath);
 	SafeDelete(mpcs_Lock);
+}
+
+bool MFileLog::IsLogOpened()
+{
+	return (mh_LogFile && (mh_LogFile != INVALID_HANDLE_VALUE));
 }
 
 void MFileLog::CloseLogFile()
@@ -172,52 +156,83 @@ HRESULT MFileLog::CreateLogFile(LPCWSTR asName /*= NULL*/, DWORD anPID /*= 0*/, 
 		if (ms_DefPath && *ms_DefPath)
 		{
 			size_t cchDirLen = lstrlen(ms_DefPath);
-            cchMax = cchDirLen + cchNamLen + 3;
+			cchMax = cchDirLen + cchNamLen + 3;
 
-            ms_FilePathName = (wchar_t*)calloc(cchMax,sizeof(*ms_FilePathName));
-            if (!ms_FilePathName)
-            	return -1;
+			ms_FilePathName = (wchar_t*)calloc(cchMax,sizeof(*ms_FilePathName));
+			if (!ms_FilePathName)
+				return -1;
 
-        	_wcscpy_c(ms_FilePathName, cchMax, ms_DefPath);
-        	if (ms_DefPath[cchMax-1] != L'\\')
-        		_wcscat_c(ms_FilePathName, cchMax, L"\\");
-    		_wcscat_c(ms_FilePathName, cchMax, ms_FileName);
+			_wcscpy_c(ms_FilePathName, cchMax, ms_DefPath);
+			if (ms_DefPath[cchMax-1] != L'\\')
+				_wcscat_c(ms_FilePathName, cchMax, L"\\");
+			_wcscat_c(ms_FilePathName, cchMax, ms_FileName);
 
 
-    		mh_LogFile = CreateFileW(ms_FilePathName, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    		// Нет прав на запись в текущую папку?
-			if (mh_LogFile == INVALID_HANDLE_VALUE)
+			mh_LogFile = CreateFileW(ms_FilePathName, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+			// Нет прав на запись в текущую папку?
+			if (!mh_LogFile || (mh_LogFile == INVALID_HANDLE_VALUE))
 			{
 				dwErr = GetLastError();
-				if (dwErr == ERROR_ACCESS_DENIED/*5*/)
-					mh_LogFile = NULL;
+				_ASSERTEX(FALSE && "Access denied?"); // ERROR_ACCESS_DENIED/*5*/?
+				// Clean variable to try Desktop folder
+				mh_LogFile = NULL;
 				SafeFree(ms_FilePathName);
+				UNREFERENCED_PARAMETER(dwErr);
 			}
 		}
 
+		// If folder was not specified or is not writable
 		if (mh_LogFile == NULL)
 		{
 			wchar_t szDesktop[MAX_PATH+1] = L"";
-			if (S_OK == SHGetFolderPath(NULL, CSIDL_DESKTOPDIRECTORY|CSIDL_FLAG_CREATE, NULL, 0/*SHGFP_TYPE_CURRENT*/, szDesktop))
+
+			typedef HRESULT (WINAPI* SHGetFolderPathW_t)(HWND hwndOwner, int nFolder, HANDLE hToken, DWORD dwFlags, LPWSTR pszPath);
+			SHGetFolderPathW_t _SHGetFolderPath;
+			HRESULT hFolderRc = E_NOTIMPL;
+
+			// To avoid static link in ConEmuHk
+			#if !defined(CONEMU_MINIMAL)
+				_SHGetFolderPath = SHGetFolderPathW;
+			#else
+				HMODULE hShell32 = LoadLibrary(L"Shell32.dll");
+				_SHGetFolderPath = hShell32 ? (SHGetFolderPathW_t)GetProcAddress(hShell32, "SHGetFolderPathW") : NULL;
+				_ASSERTEX(_SHGetFolderPath!=NULL);
+			#endif
+
+			if (_SHGetFolderPath)
+			{
+				hFolderRc = _SHGetFolderPath(NULL, CSIDL_DESKTOPDIRECTORY|CSIDL_FLAG_CREATE, NULL, 0/*SHGFP_TYPE_CURRENT*/, szDesktop);
+			}
+
+			#if defined(CONEMU_MINIMAL)
+			if (hShell32)
+			{
+				FreeLibrary(hShell32);
+			}
+			#endif
+
+			// Check the result
+			if (hFolderRc == S_OK)
 			{
 				size_t cchDirLen = lstrlen(szDesktop);
-	            cchMax = cchDirLen + cchNamLen + 32;
+				cchMax = cchDirLen + cchNamLen + 32;
 
-	            ms_FilePathName = (wchar_t*)calloc(cchMax,sizeof(*ms_FilePathName));
-	            if (!ms_FilePathName)
-	            	return -1;
+				ms_FilePathName = (wchar_t*)calloc(cchMax,sizeof(*ms_FilePathName));
+				if (!ms_FilePathName)
+					return -1;
 
-	        	_wcscpy_c(ms_FilePathName, cchMax, szDesktop);
-	        	_wcscat_c(ms_FilePathName, cchMax, (szDesktop[cchDirLen-1] != L'\\') ? L"\\ConEmuLogs" : L"ConEmuLogs");
+				_wcscpy_c(ms_FilePathName, cchMax, szDesktop);
+				_wcscat_c(ms_FilePathName, cchMax, (szDesktop[cchDirLen-1] != L'\\') ? L"\\ConEmuLogs" : L"ConEmuLogs");
 				CreateDirectory(ms_FilePathName, NULL);
 				_wcscat_c(ms_FilePathName, cchMax, L"\\");
-	    		_wcscat_c(ms_FilePathName, cchMax, ms_FileName);
+				_wcscat_c(ms_FilePathName, cchMax, ms_FileName);
 
-	    		mh_LogFile = CreateFileW(ms_FilePathName, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-	    		// Нет прав на запись в текущую папку?
-				if (mh_LogFile == INVALID_HANDLE_VALUE)
+				mh_LogFile = CreateFileW(ms_FilePathName, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+				// Access denied? On desktop? Really?
+				if (!mh_LogFile || (mh_LogFile == INVALID_HANDLE_VALUE))
 				{
 					dwErr = GetLastError();
+					_ASSERTEX(FALSE && "Can't create file on desktop");
 					mh_LogFile = NULL;
 				}
 			}
@@ -228,11 +243,14 @@ HRESULT MFileLog::CreateLogFile(LPCWSTR asName /*= NULL*/, DWORD anPID /*= 0*/, 
 		if (!ms_FilePathName || !*ms_FilePathName)
 			return -1;
 
-		mh_LogFile = CreateFileW(ms_FilePathName, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-		if (mh_LogFile == INVALID_HANDLE_VALUE)
+		// Reopen same file after temporary close?
+		// Use append mode, don't clear existing contents.
+		mh_LogFile = CreateFileW(ms_FilePathName, GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (!mh_LogFile || (mh_LogFile == INVALID_HANDLE_VALUE))
 		{
-			mh_LogFile = NULL;
 			dwErr = GetLastError();
+			_ASSERTEX(FALSE && "Can't open file for writing");
+			mh_LogFile = NULL;
 		}
 	}
 
@@ -369,12 +387,10 @@ void MFileLog::LogString(LPCWSTR asText, bool abWriteTime /*= true*/, LPCWSTR as
 		FlushFileBuffers(mh_LogFile);
 		#endif
 	}
-	else
-	{
-		#ifdef _DEBUG
-		DEBUGSTRLOG(asText);
-		#endif
-	}
+
+	#ifdef _DEBUG
+	DEBUGSTRLOG(pszBuffer);
+	#endif
 
 	SafeFree(pszTemp);
 
@@ -411,6 +427,7 @@ void MFileLog::LogString(LPCWSTR asText, bool abWriteTime /*= true*/, LPCWSTR as
 #endif
 }
 
+#if !defined(CONEMU_MINIMAL)
 void MFileLog::LogStartEnvInt(LPCWSTR asText, LPARAM lParam, bool bFirst, bool bNewLine)
 {
 	MFileLog* p = (MFileLog*)lParam;
@@ -421,3 +438,4 @@ void MFileLog::LogStartEnv(CEStartupEnv* apStartEnv)
 {
 	LoadStartupEnvEx::ToString(apStartEnv, LogStartEnvInt, (LPARAM)this);
 }
+#endif

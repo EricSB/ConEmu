@@ -719,7 +719,7 @@ void CheckOptionsFast(LPCWSTR asTitle, SettingsLoadedFlags slfFlags)
 
 static SettingsLoadedFlags sAppendMode = slf_None;
 
-static void CreateDefaultTask(LPCWSTR asName, LPCWSTR asGuiArg, LPCWSTR asCommands)
+static void CreateDefaultTask(LPCWSTR asName, LPCWSTR asGuiArg, LPCWSTR asCommands, CETASKFLAGS aFlags = CETF_DONT_CHANGE)
 {
 	_ASSERTE(asName && asName[0] && asName[0] != TaskBracketLeft && asName[wcslen(asName)-1] != TaskBracketRight);
 	wchar_t szLeft[2] = {TaskBracketLeft}, szRight[2] = {TaskBracketRight};
@@ -740,7 +740,7 @@ static void CreateDefaultTask(LPCWSTR asName, LPCWSTR asGuiArg, LPCWSTR asComman
 		}
 	}
 
-	gpSet->CmdTaskSet(iCreatIdx++, lsName, asGuiArg, asCommands);
+	gpSet->CmdTaskSet(iCreatIdx++, lsName, asGuiArg, asCommands, aFlags);
 }
 
 // Search on asFirstDrive and all (other) fixed drive letters
@@ -984,6 +984,7 @@ public:
 		VarDef v = {};
 		while (Vars.pop_back(v))
 		{
+			SafeFree(v.pszName);
 			SafeFree(v.pszValue);
 		}
 	};
@@ -1725,7 +1726,7 @@ void CreateDefaultTasks(SettingsLoadedFlags slfFlags)
 	// Windows internal: cmd
 	// Don't use 'App.Add' here, we are creating "cmd.exe" tasks directly
 	CreateDefaultTask(L"Shells::cmd", L"",
-		L"cmd.exe /k \"%ConEmuBaseDir%\\CmdInit.cmd\"");
+		L"cmd.exe /k \"%ConEmuBaseDir%\\CmdInit.cmd\"", CETF_CMD_DEFAULT);
 	#if 0
 	// Need to "set" ConEmuGitPath to full path to the git.exe
 	CreateDefaultTask(L"Shells::cmd+git", L"",
@@ -1733,9 +1734,13 @@ void CreateDefaultTasks(SettingsLoadedFlags slfFlags)
 	#endif
 	CreateDefaultTask(L"Shells::cmd (Admin)", L"",
 		L"cmd.exe /k \"%ConEmuBaseDir%\\CmdInit.cmd\" -new_console:a");
-	// Windows internal: For 64bit Windows create task with splitted cmd 64/32 (Example)
+	// On 64-bit OS we suggest more options
 	if (IsWindows64())
 	{
+		// Add {cmd-32} task to run 32-bit cmd.exe
+		CreateDefaultTask(L"Shells::cmd-32", L"",
+			L"\"%windir%\\syswow64\\cmd.exe\" /k \"%ConEmuBaseDir%\\CmdInit.cmd\"");
+		// Windows internal: For 64bit Windows create task with splitted cmd 64/32 (Example)
 		CreateDefaultTask(L"Shells::cmd 64/32", L"",
 			L"> \"%windir%\\system32\\cmd.exe\" /k \"\"%ConEmuBaseDir%\\CmdInit.cmd\" & echo This is Native cmd.exe\""
 			L"\r\n\r\n"

@@ -7,6 +7,8 @@ EXPORTS
 	SetFarHookMode
 	GetRealConsoleWindow
 	GetLoadLibraryW
+	GetVirtualAlloc
+	GetTrampoline
 	GetWriteConsoleW
 	RequestLocalServer
 	WriteProcessed

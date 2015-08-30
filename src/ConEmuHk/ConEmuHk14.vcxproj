@@ -53,56 +53,56 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_F3|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <PlatformToolset>v120_xp</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Instrument|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <PlatformToolset>v120_xp</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_R|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <PlatformToolset>v120_xp</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <PlatformToolset>v120_xp</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_C|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <PlatformToolset>v120_xp</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_F3|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <PlatformToolset>v120_xp</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Instrument|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <PlatformToolset>v120_xp</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_R|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <PlatformToolset>v120_xp</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <PlatformToolset>v120_xp</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_C|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <PlatformToolset>v120_xp</PlatformToolset>
+    <PlatformToolset>v120</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
@@ -510,9 +510,11 @@
     <ClInclude Include="..\common\defines.h" />
     <ClInclude Include="..\common\DefTermBase.h" />
     <ClInclude Include="..\common\Execute.h" />
+    <ClInclude Include="..\common\HkFunc.h" />
     <ClInclude Include="..\common\InQueue.h" />
     <ClInclude Include="..\common\MConHandle.h" />
     <ClInclude Include="..\common\Memory.h" />
+    <ClInclude Include="..\common\MFileLog.h" />
     <ClInclude Include="..\common\MSection.h" />
     <ClInclude Include="..\common\MSectionSimple.h" />
     <ClInclude Include="..\common\MSecurity.h" />
@@ -526,12 +528,21 @@
     <ClInclude Include="..\common\WObjects.h" />
     <ClInclude Include="..\common\WThreads.h" />
     <ClInclude Include="..\ConEmuCD\ExitCodes.h" />
+    <ClInclude Include="..\modules\minhook\include\MinHook.h" />
+    <ClInclude Include="..\modules\minhook\src\buffer.h" />
+    <ClInclude Include="..\modules\minhook\src\HDE\hde32.h" />
+    <ClInclude Include="..\modules\minhook\src\HDE\hde64.h" />
+    <ClInclude Include="..\modules\minhook\src\HDE\pstdint.h" />
+    <ClInclude Include="..\modules\minhook\src\HDE\table32.h" />
+    <ClInclude Include="..\modules\minhook\src\HDE\table64.h" />
+    <ClInclude Include="..\modules\minhook\src\trampoline.h" />
     <ClInclude Include="Ansi.h" />
     <ClInclude Include="ConEmuHooks.h" />
     <ClInclude Include="Console2.h" />
     <ClInclude Include="ExtConsole.h" />
     <ClInclude Include="GuiAttach.h" />
     <ClInclude Include="Injects.h" />
+    <ClInclude Include="MainThread.h" />
     <ClInclude Include="RegHooks.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="SetHook.h" />
@@ -548,10 +559,12 @@
     <ClCompile Include="..\common\ConsoleMixAttr.cpp" />
     <ClCompile Include="..\common\ConsoleRead.cpp" />
     <ClCompile Include="..\common\Execute.cpp" />
+    <ClCompile Include="..\common\HkFunc.cpp" />
     <ClCompile Include="..\common\InQueue.cpp" />
     <ClCompile Include="..\common\MAssert.cpp" />
     <ClCompile Include="..\common\MConHandle.cpp" />
     <ClCompile Include="..\common\Memory.cpp" />
+    <ClCompile Include="..\common\MFileLog.cpp" />
     <ClCompile Include="..\common\MSection.cpp" />
     <ClCompile Include="..\common\MSectionSimple.cpp" />
     <ClCompile Include="..\common\MSecurity.cpp" />
@@ -560,13 +573,42 @@
     <ClCompile Include="..\common\WConsole.cpp" />
     <ClCompile Include="..\common\WObjects.cpp" />
     <ClCompile Include="..\common\WThreads.cpp" />
+    <ClCompile Include="..\modules\minhook\src\buffer.c" />
+    <ClCompile Include="..\modules\minhook\src\HDE\hde32.c">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug_R|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug_C|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug_F3|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Instrument|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug_R|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug_C|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug_F3|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Instrument|x64'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="..\modules\minhook\src\HDE\hde64.c">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug_R|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug_C|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug_F3|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Instrument|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug_R|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug_C|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug_F3|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Instrument|x64'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="..\modules\minhook\src\hook.c" />
+    <ClCompile Include="..\modules\minhook\src\trampoline.c" />
     <ClCompile Include="Ansi.cpp" />
     <ClCompile Include="ConEmuHooks.cpp" />
     <ClCompile Include="DefTermHk.cpp" />
     <ClCompile Include="Entry.cpp" />
     <ClCompile Include="ExtConsole.cpp" />
     <ClCompile Include="GuiAttach.cpp" />
+    <ClCompile Include="hde.c" />
     <ClCompile Include="Injects.cpp" />
+    <ClCompile Include="MainThread.cpp" />
     <ClCompile Include="RegHooks.cpp" />
     <ClCompile Include="SetHook.cpp" />
     <ClCompile Include="ShellProcessor.cpp" />
@@ -574,6 +616,9 @@
   <ItemGroup>
     <None Include="export.def" />
     <None Include="!Todo.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="..\modules\minhook\LICENSE.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

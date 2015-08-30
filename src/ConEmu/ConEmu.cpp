@@ -538,7 +538,7 @@ CConEmuMain::CConEmuMain()
 
 	if (!lbBaseFound)
 	{
-		// Если все-равно не нашли - промерить, может это mingw?
+		// Если все-равно не нашли - проверить, может это mingw?
 		pszSlash = wcsrchr(ms_ConEmuExeDir, L'\\');
 		if (pszSlash && (lstrcmpi(pszSlash, L"\\bin") == 0))
 		{
@@ -767,7 +767,6 @@ void CConEmuMain::RegisterMessages()
 	mn_MsgCreateViewWindow = RegisterMessage("CreateViewWindow");
 	mn_MsgPostTaskbarActivate = RegisterMessage("PostTaskbarActivate"); mb_PostTaskbarActivate = FALSE;
 	mn_MsgInitVConGhost = RegisterMessage("InitVConGhost");
-	mn_MsgCreateCon = RegisterMessage("CreateCon");
 	mn_MsgPanelViewMapCoord = RegisterMessage("CONEMUMSG_PNLVIEWMAPCOORD",CONEMUMSG_PNLVIEWMAPCOORD);
 	mn_MsgTaskBarCreated = RegisterMessage("TaskbarCreated",L"TaskbarCreated");
 	mn_MsgTaskBarBtnCreated = RegisterMessage("TaskbarButtonCreated",L"TaskbarButtonCreated");
@@ -1938,7 +1937,7 @@ bool CConEmuMain::SetParent(HWND hNewParent)
 void CConEmuMain::FillConEmuMainFont(ConEmuMainFont* pFont)
 {
 	// Параметры основного шрифта ConEmu
-	lstrcpy(pFont->sFontName, gpSetCls->FontFaceName());
+	lstrcpyn(pFont->sFontName, gpSetCls->FontFaceName(), countof(pFont->sFontName));
 	pFont->nFontHeight = gpSetCls->FontHeight();
 	pFont->nFontWidth = gpSetCls->FontWidth();
 	pFont->nFontCellWidth = gpSetCls->FontCellWidth();
@@ -1946,7 +1945,7 @@ void CConEmuMain::FillConEmuMainFont(ConEmuMainFont* pFont)
 	pFont->nFontCharSet = gpSetCls->FontCharSet();
 	pFont->Bold = gpSetCls->FontBold();
 	pFont->Italic = gpSetCls->FontItalic();
-	lstrcpy(pFont->sBorderFontName, gpSetCls->BorderFontFaceName());
+	lstrcpyn(pFont->sBorderFontName, gpSetCls->BorderFontFaceName(), countof(pFont->sBorderFontName));
 	pFont->nBorderFontWidth = gpSetCls->BorderFontWidth();
 }
 
@@ -2633,6 +2632,8 @@ CConEmuMain::~CConEmuMain()
 
 	SafeDelete(mp_AttachDlg);
 	SafeDelete(mp_RecreateDlg);
+	SafeCloseHandle(mh_ConEmuAliveEvent);
+	SafeCloseHandle(mh_ConEmuAliveEventNoDir);
 
 	CVConGroup::DestroyAllVCon();
 
@@ -2965,6 +2966,7 @@ bool CConEmuMain::SessionInfo::Connected()
 	return (wState!=7/*WTS_SESSION_LOCK*/);
 }
 
+// Called from: WM_WTSSESSION_CHANGE -> CConEmuMain::OnSessionChanged
 void CConEmuMain::SessionInfo::SessionChanged(WPARAM State, LPARAM SessionID)
 {
 	wState = State;
@@ -3013,12 +3015,16 @@ void CConEmuMain::SessionInfo::SetSessionNotification(bool bSwitch)
 	}
 }
 
+// WM_WTSSESSION_CHANGE
 LRESULT CConEmuMain::OnSessionChanged(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
+	DEBUGTEST(bool bPrevConnected = session.Connected());
+
 	session.SessionChanged(wParam, lParam);
 
 	wchar_t szInfo[128], szState[32];
-	switch (LOWORD(wParam))
+	WORD nSessionCode = LOWORD(wParam);
+	switch (nSessionCode)
 	{
 		//0x1 The session identified by lParam was connected to the console terminal or RemoteFX session.
 		case WTS_CONSOLE_CONNECT: wcscpy_c(szState, L"WTS_CONSOLE_CONNECT"); break;
@@ -3042,11 +3048,50 @@ LRESULT CConEmuMain::OnSessionChanged(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 		case 0xA/*WTS_SESSION_CREATE*/: wcscpy_c(szState, L"WTS_SESSION_CREATE"); break;
 		//0xB Reserved for future use.
 		case 0xB/*WTS_SESSION_TERMINATE*/: wcscpy_c(szState, L"WTS_SESSION_TERMINATE"); break;
-		default: _wsprintf(szState, SKIPLEN(countof(szState)) L"x%08X", (DWORD)wParam);
+		default: _wsprintf(szState, SKIPLEN(countof(szState)) WIN3264TEST(L"x%08X",L"x%0X%08X"), WIN3264WSPRINT(wParam));
 	}
 	_wsprintf(szInfo, SKIPLEN(countof(szInfo)) L"Session State (#%i): %s\r\n", (int)lParam, szState);
 	LogString(szInfo, true, false);
 	DEBUGSTRSESS(szInfo);
+
+	if ((nSessionCode == WTS_SESSION_LOCK)
+		|| (nSessionCode == WTS_SESSION_UNLOCK)
+		)
+	{
+		// Ignore window size changes until station will be unlocked
+		if (nSessionCode == WTS_SESSION_LOCK)
+		{
+			_ASSERTE(bPrevConnected && (mn_IgnoreSizeChange >= 0));
+
+			if (!session.bWasLocked)
+			{
+				session.bWasLocked = TRUE;
+				InterlockedIncrement(&mn_IgnoreSizeChange);
+			}
+		}
+		else if (nSessionCode == WTS_SESSION_UNLOCK)
+		{
+			_ASSERTE(!bPrevConnected && (mn_IgnoreSizeChange > 0));
+			if (session.bWasLocked && (mn_IgnoreSizeChange > 0))
+			{
+				session.bWasLocked = FALSE;
+				InterlockedDecrement(&mn_IgnoreSizeChange);
+			}
+		}
+
+		// Stop all servers from reading console contents
+		struct impl {
+			static bool DoLockUnlock(CVirtualConsole* pVCon, LPARAM lParam)
+			{
+				pVCon->RCon()->DoLockUnlock(lParam == WTS_SESSION_LOCK);
+				return true; // continue;
+			};
+		};
+		CVConGroup::EnumVCon(evf_All, impl::DoLockUnlock, (LPARAM)nSessionCode);
+
+		// Refresh child windows
+		OnSize();
+	}
 
 	return 0; // Return value ignored
 }
@@ -3266,7 +3311,25 @@ CVirtualConsole* CConEmuMain::CreateCon(RConStartArgs *args, bool abAllowScripts
 void CConEmuMain::PostCreateCon(RConStartArgs *pArgs)
 {
 	_ASSERTE((pArgs->pszStartupDir == NULL) || (*pArgs->pszStartupDir != 0));
-	PostMessage(ghWnd, mn_MsgCreateCon, mn_MsgCreateCon+1, (LPARAM)pArgs);
+
+	struct impl {
+		CConEmuMain* pObj;
+		RConStartArgs *pArgs;
+
+		static LRESULT CreateConMainThread(LPARAM lParam)
+		{
+			impl *p = (impl*)lParam;
+			CVirtualConsole* pVCon = p->pObj->CreateCon(p->pArgs, true);
+			delete p->pArgs;
+			delete p;
+			return (LRESULT)pVCon;
+		};
+	} *Impl = new impl;
+	Impl->pObj = this;
+	Impl->pArgs = pArgs;
+
+	// Execute asynchronously
+	CallMainThread(false, impl::CreateConMainThread, (LPARAM)Impl);
 }
 
 LPCWSTR CConEmuMain::ParseScriptLineOptions(LPCWSTR apszLine, bool* rpbAsAdmin, bool* rpbSetActive, size_t cchNameMax, wchar_t* rsName/*[MAX_RENAME_TAB_LEN]*/)
@@ -3431,6 +3494,7 @@ CVirtualConsole* CConEmuMain::CreateConGroup(LPCWSTR apszScript, bool abForceAsA
 
 			if (*pszLine)
 			{
+				SafeFree(args.pszSpecialCmd);
 				args.pszSpecialCmd = lstrdup(pszLine);
 
 				if (lbRunAdmin) // don't reset one that may come from apDefArgs
@@ -4615,6 +4679,7 @@ bool CConEmuMain::RecreateAction(RecreateActionParm aRecreate, BOOL abConfirm, R
 			if (!args.pszSpecialCmd || !*args.pszSpecialCmd)
 			{
 				_ASSERTE((args.pszSpecialCmd && *args.pszSpecialCmd) || !abConfirm);
+				SafeFree(args.pszSpecialCmd);
 				args.pszSpecialCmd = lstrdup(GetCmd());
 			}
 
@@ -7132,7 +7197,10 @@ wchar_t* CConEmuMain::LoadConsoleBatch_Task(LPCWSTR asSource, RConStartArgs* pAr
 				RConStartArgs args;
 				args.aRecreate = (mn_StartupFinished == ss_Started) ? cra_EditTab : cra_CreateTab;
 				if (pszDefCmd && *pszDefCmd)
+				{
+					SafeFree(args.pszSpecialCmd);
 					args.pszSpecialCmd = lstrdup(pszDefCmd);
+				}
 
 				int nCreateRc = RecreateDlg(&args);
 
@@ -7407,6 +7475,7 @@ void CConEmuMain::PostCreate(BOOL abReceived/*=FALSE*/)
 
 				if (args.Detached != crb_On)
 				{
+					SafeFree(args.pszSpecialCmd);
 					args.pszSpecialCmd = lstrdup(GetCmd());
 
 					CEStr lsLog(lstrmerge(L"Creating console using command ", args.pszSpecialCmd));
@@ -7877,8 +7946,7 @@ LRESULT CConEmuMain::OnFocus(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam
 				// Запускается новая консоль в режиме "администратора"?
 				if (CVConGroup::isInCreateRoot())
 				{
-					wchar_t szClass[MAX_PATH];
-					if (GetClassName(hNewFocus, szClass, countof(szClass)) && isConsoleClass(szClass))
+					if (isConsoleWindow(hNewFocus))
 					{
 						lbSetFocus = true;
 					}
@@ -11623,7 +11691,7 @@ void CConEmuMain::CheckFocus(LPCWSTR asFrom)
 			GetGUIThreadInfo(0/*dwTID*/, &gti);
 
 			#ifdef _DEBUG
-			_wsprintf(szDbg, SKIPLEN(countof(szDbg)) L"Foreground changed (%s). NewFore=0x%08X, Active=0x%08X, Focus=0x%08X, Class=%s, LBtn=%i\n", asFrom, (DWORD)hCurForeground, (DWORD)gti.hwndActive, (DWORD)gti.hwndFocus, szClass, lbLDown);
+			_wsprintf(szDbg, SKIPLEN(countof(szDbg)) L"Foreground changed (%s). NewFore=0x%08X, Active=0x%08X, Focus=0x%08X, Class=%s, LBtn=%i\n", asFrom, LODWORD(hCurForeground), LODWORD(gti.hwndActive), LODWORD(gti.hwndFocus), szClass, lbLDown);
 			#endif
 
 			// mh_ShellWindow чисто для информации. Хоть родитель ConEmu и меняется на mh_ShellWindow
@@ -14088,15 +14156,6 @@ LRESULT CConEmuMain::WndProc(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam
 				if (this->isValid(pVCon))
 					pVCon->InitGhost();
 				return 0;
-			}
-			else if (messg == this->mn_MsgCreateCon)
-			{
-				_ASSERTE(wParam == this->mn_MsgCreateCon || wParam == (this->mn_MsgCreateCon+1));
-				RConStartArgs *pArgs = (RConStartArgs*)lParam;
-				CVirtualConsole* pVCon = CreateCon(pArgs, (wParam == (this->mn_MsgCreateCon+1)));
-				UNREFERENCED_PARAMETER(pVCon);
-				delete pArgs;
-				return (LRESULT)pVCon;
 			}
 			else if (messg == this->mn_MsgTaskBarCreated)
 			{

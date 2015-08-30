@@ -39,6 +39,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //#define USEPORTABLEREGISTRY
 #undef USEPORTABLEREGISTRY
 
+#include "../common/defines.h"
 #include <windows.h>
 #include <Shlwapi.h>
 //#include <vector>
@@ -330,7 +331,6 @@ struct SettingsStorage
 #include "Registry.h"
 
 #include "../common/UnicodeChars.h"
-#include "../common/defines.h"
 #include "../common/WObjects.h"
 #include "../common/CmdLine.h"
 
@@ -774,8 +774,6 @@ typedef struct tagMYRGB
 #define TaskBracketRight  L'}'
 #define AutoStartTaskName L"<Startup>"
 #define AutoStartTaskLeft L'<'
-
-bool NextLine(const wchar_t*& pszFrom, wchar_t** pszLine);
 
 // pszWords - '|'separated
 void StripWords(wchar_t* pszText, const wchar_t* pszWords);

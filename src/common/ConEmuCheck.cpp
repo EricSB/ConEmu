@@ -1,6 +1,6 @@
 ﻿
 /*
-Copyright (c) 2009-2014 Maximus5
+Copyright (c) 2009-2015 Maximus5
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -33,6 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ConEmuCheck.h"
 #include "ConEmuPipeMode.h"
 #include "MFileMapping.h"
+#include "HkFunc.h"
 
 #ifdef _DEBUG
 #include "CmdLine.h"
@@ -741,7 +742,7 @@ CESERVER_REQ* ExecuteGuiCmd(HWND hConWnd, CESERVER_REQ* pIn, HWND hOwner, BOOL b
 }
 
 // Выполнить в ConEmuC
-CESERVER_REQ* ExecuteSrvCmd(DWORD dwSrvPID, CESERVER_REQ* pIn, HWND hOwner, BOOL bAsyncNoResult, DWORD nTimeout /*= 0*/)
+CESERVER_REQ* ExecuteSrvCmd(DWORD dwSrvPID, CESERVER_REQ* pIn, HWND hOwner, BOOL bAsyncNoResult, DWORD nTimeout /*= 0*/, BOOL bIgnoreAbsence /*= FALSE*/)
 {
 	wchar_t szPipeName[128];
 
@@ -751,7 +752,7 @@ CESERVER_REQ* ExecuteSrvCmd(DWORD dwSrvPID, CESERVER_REQ* pIn, HWND hOwner, BOOL
 	DWORD nLastErr = GetLastError();
 	//_wsprintf(szPipeName, SKIPLEN(countof(szPipeName)) CESERVERPIPENAME, L".", (DWORD)dwSrvPID);
 	msprintf(szPipeName, countof(szPipeName), CESERVERPIPENAME, L".", (DWORD)dwSrvPID);
-	CESERVER_REQ* lpRet = ExecuteCmd(szPipeName, pIn, nTimeout, hOwner, bAsyncNoResult, dwSrvPID);
+	CESERVER_REQ* lpRet = ExecuteCmd(szPipeName, pIn, nTimeout, hOwner, bAsyncNoResult, dwSrvPID, bIgnoreAbsence);
 	_ASSERTE(pIn->hdr.bAsync == bAsyncNoResult);
 	SetLastError(nLastErr); // Чтобы не мешать процессу своими возможными ошибками общения с пайпом
 	return lpRet;
@@ -856,7 +857,7 @@ CESERVER_REQ* ExecuteCmd(const wchar_t* szPipeName, CESERVER_REQ* pIn, DWORD nWa
 		_ASSERTE(fSuccess && (cbRead == pIn->hdr.cbSize));
 		#endif
 
-		// -- Do not close hPipe, otherwise the reader may fails with that packet
+		// -- Do not close hPipe, otherwise the reader may fail with that packet
 		// -- with error ‘pipe was closed before end’.
 		// -- Handle leak, yeah, however this is rarely used op.
 		// -- Must be refactored, but not so critical...
@@ -1032,80 +1033,103 @@ void SendCurrentDirectory(HWND hConWnd, LPCWSTR asDirectory, LPCWSTR asPassiveDi
 	ExecuteFreeResult(pIn);
 }
 
+bool isConsoleClass(LPCWSTR asClass)
+{
+	if ((asClass && *asClass)
+		&& (
+			(lstrcmp(asClass, RealConsoleClass) == 0)
+			|| (lstrcmp(asClass, WineConsoleClass) == 0)
+		))
+		return true;
+
+	return false;
+}
+
+bool isConsoleWindow(HWND hWnd)
+{
+	wchar_t szClass[64] = L"";
+
+	if (!hWnd)
+		return false;
+	if (!GetClassName(hWnd, szClass, countof(szClass)))
+		return false;
+	if (!isConsoleClass(szClass))
+		return false;
+
+	// But when process is hooked, GetConsoleClass will return "proper" name
+	// even if hWnd points to our VirtualConsole
+
+	// RealConsole handle is stored in the Window DATA
+	wchar_t szClassPtr[64] = L"";
+	HWND h = (HWND)GetWindowLongPtr(hWnd, 0);
+	if (h && (h != hWnd) && IsWindow(h))
+	{
+		if (GetClassName(h, szClassPtr, countof(szClassPtr)))
+		{
+			if (isConsoleClass(szClassPtr))
+			{
+				_ASSERTE(FALSE && "RealConsole handle was not retrieved properly!");
+				return false;
+			}
+		}
+	}
+
+	// Well, it's a RealConsole
+	return true;
+}
+
+GetConsoleWindow_T gfGetRealConsoleWindow = NULL;
+
 HWND myGetConsoleWindow()
 {
 	HWND hConWnd = NULL;
-	static HMODULE hHookLib = NULL;
-	if (!hHookLib)
-		hHookLib = GetModuleHandle(WIN3264TEST(L"ConEmuHk.dll",L"ConEmuHk64.dll"));
-	if (hHookLib)
+
+	// If we are in ConEmuHk than gfGetRealConsoleWindow may be set
+	if (gfGetRealConsoleWindow)
 	{
-		typedef HWND (WINAPI* GetRealConsoleWindow_t)();
-		static GetRealConsoleWindow_t GetRealConsoleWindow_f = NULL;
-		if (!GetRealConsoleWindow_f)
-			GetRealConsoleWindow_f = (GetRealConsoleWindow_t)GetProcAddress(hHookLib, "GetRealConsoleWindow");
-		if (GetRealConsoleWindow_f)
-		{
-			hConWnd = GetRealConsoleWindow_f();
-		}
-		else
-		{
-			_ASSERTE(GetRealConsoleWindow_f!=NULL);
-		}
+		hConWnd = gfGetRealConsoleWindow();
+		// If the function pointer was set - it must be proper function
+		_ASSERTEX(hConWnd==NULL || isConsoleWindow(hConWnd));
+		return hConWnd;
+	}
+
+	// To avoid infinite loops (GetModuleHandleEx is not available in Win2k)
+	_ASSERTE(ghWorkingModule != 0);
+	DEBUGTEST(HMODULE hOurModule = (HMODULE)(DWORD_PTR)ghWorkingModule);
+	WARNING("DANGER zone. If ConEmuHk unloads following may cause crashes");
+	if (!hkFunc.isConEmuHk())
+	{
+		#ifdef _DEBUG
+		static HMODULE hHookLib = NULL;
+		if (!hHookLib) hHookLib = GetModuleHandle(WIN3264TEST(L"ConEmuHk.dll",L"ConEmuHk64.dll"));
+		_ASSERTEX(hHookLib != hOurModule);
+		#endif
+
+		hConWnd = hkFunc.getConsoleWindow();
 	}
 
 	if (!hConWnd)
 	{
 		hConWnd = GetConsoleWindow();
-		// Это может быть GUI приложение
+		// Current process may be GUI and have no console at all
 		if (!hConWnd)
 			return NULL;
-	}
 
-#ifdef _DEBUG
-	// Избежать статической линковки для user32.dll
-	HMODULE hUser32 = GetModuleHandle(L"user32.dll");
-	if (!hUser32)
-	{
-		// Скорее всего, user32 уже должен быть загружен, но если вдруг - сильно
-		// плохо, если он будет вызываться из DllMain
-		_ASSERTE(hUser32!=NULL);
-		hUser32 = LoadLibrary(L"user32.dll");
-	}
-	typedef LONG_PTR (WINAPI* GetWindowLongPtr_t)(HWND,int);
-	GetWindowLongPtr_t GetWindowLongPtr_f = (GetWindowLongPtr_t)GetProcAddress(hUser32,WIN3264TEST("GetWindowLongW","GetWindowLongPtrW"));
-	typedef int (WINAPI* GetClassName_t)(HWND hWnd,LPWSTR lpClassName,int nMaxCount);
-	GetClassName_t GetClassName_f = (GetClassName_t)GetProcAddress(hUser32,"GetClassNameW");
-	typedef LONG_PTR (WINAPI* IsWindow_t)(HWND);
-	IsWindow_t IsWindow_f = (IsWindow_t)GetProcAddress(hUser32,"IsWindow");
-
-	if (!(GetClassName_f && GetWindowLongPtr_f && IsWindow_f))
-	{
-		_ASSERTE(GetClassName_f && GetWindowLongPtr_f);
-	}
-	else
-	{
-		wchar_t sClass[64];
-		if (hConWnd)
-			GetClassName_f(hConWnd, sClass, countof(sClass));
-		_ASSERTE(hConWnd==NULL || isConsoleClass(sClass));
-		#if 0
-		if (lstrcmp(sClass, VirtualConsoleClass) == 0)
+		// RealConsole handle is stored in the Window DATA
+		if (!hkFunc.isConEmuHk())
 		{
-			// в данных окна DC - хранится хэндл окна консоли
-			HWND h = (HWND)GetWindowLongPtr_f(hConWnd, 0);
-			if (h && IsWindow_f(h))
+			#ifdef _DEBUG
+			wchar_t sClass[64] = L""; GetClassName(hConWnd, sClass, countof(sClass));
+			#endif
+
+			// Regardless of GetClassName result, it may be VirtualConsoleClass
+			HWND h = (HWND)GetWindowLongPtr(hConWnd, 0);
+			if (h && IsWindow(h) && isConsoleWindow(h))
 			{
 				hConWnd = h;
 			}
-			else
-			{
-				_ASSERTE(h && IsWindow_f(h));
-			}
 		}
-		#endif
 	}
-#endif
 
 	return hConWnd;
 

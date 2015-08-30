@@ -52,6 +52,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "Options.h"
 #include "OptionsClass.h"
 #include "ConEmu.h"
+#include "ConfirmDlg.h"
 #include "DpiAware.h"
 #include "HooksUnlocker.h"
 #include "Inside.h"
@@ -76,6 +77,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //	#define DEBUG_MSG_HOOKS
 #endif
 
+#ifdef __CYGWIN__
+//	#define SHOW_STARTED_MSGBOX
+#endif
+
 #define DEBUGSTRMOVE(s) //DEBUGSTR(s)
 #define DEBUGSTRTIMER(s) //DEBUGSTR(s)
 #define DEBUGSTRSETHOTKEY(s) //DEBUGSTR(s)
@@ -97,6 +102,11 @@ BOOL gbNoDblBuffer = false;
 #endif
 BOOL gbMessagingStarted = FALSE;
 
+
+#if defined(__CYGWIN__)
+const CLSID CLSID_ShellWindows = {0x9BA05972, 0xF6A8, 0x11CF, {0xA4, 0x42, 0x00, 0xA0, 0xC9, 0x0A, 0x8F, 0x39}};
+const IID IID_IShellWindows = {0x85CB6900, 0x4D95, 0x11CF, {0x96, 0x0C, 0x00, 0x80, 0xC7, 0xF4, 0xEE, 0x85}};
+#endif
 
 
 //externs
@@ -3232,6 +3242,131 @@ void ResetEnvironmentVariables()
 	SetEnvironmentVariable(ENV_CONEMU_HOOKS_W, NULL);
 }
 
+int CheckZoneIdentifiers(bool abAutoUnblock)
+{
+	if (!gpConEmu)
+	{
+		_ASSERTE(gpConEmu!=NULL);
+		return 0;
+	}
+
+	CEStr szZonedFiles;
+
+	LPCWSTR pszDirs[] = {
+		gpConEmu->ms_ConEmuExeDir,
+		gpConEmu->ms_ConEmuBaseDir,
+		NULL};
+	LPCWSTR pszFiles[] = {
+		L"ConEmu.exe", L"ConEmu64.exe",
+		L"ConEmuC.exe", L"ConEmuC64.exe",
+		L"ConEmuCD.dll", L"ConEmuCD64.dll",
+		L"ConEmuHk.dll", L"ConEmuHk64.dll",
+		NULL};
+
+	for (int i = 0; i <= 1; i++)
+	{
+		if (i && (lstrcmpi(pszDirs[0], pszDirs[1]) == 0))
+			break; // ms_ConEmuExeDir & ms_ConEmuBaseDir
+
+		for (int j = 0; pszFiles[j]; j++)
+		{
+			CEStr lsFile = JoinPath(pszDirs[i], pszFiles[j]);
+			int nZone = 0;
+			if (HasZoneIdentifier(lsFile, nZone)
+				&& (nZone != 0 /*LocalComputer*/))
+			{
+				lstrmerge(&szZonedFiles.ms_Arg, szZonedFiles.ms_Arg ? L"\r\n" : NULL, lsFile.ms_Arg);
+			}
+		}
+	}
+
+	if (!szZonedFiles.ms_Arg)
+	{
+		return 0; // All files are OK
+	}
+
+	CEStr lsMsg = lstrmerge(
+		L"ConEmu binaries were marked as ‘Downloaded from internet’:\r\n",
+		szZonedFiles.ms_Arg, L"\r\n\r\n"
+		L"This may cause blocking or access denied errors!");
+
+	int iBtn = abAutoUnblock ? IDYES
+		: ConfirmDialog(lsMsg, L"Warning!", NULL, NULL, MB_YESNOCANCEL,
+			L"Unblock and Continue", L"Let ConEmu try to unblock these files" L"\r\n" L"You may see SmartScreen and UAC confirmations",
+			L"Visit home page and Exit", CEZONEID /* http://conemu.github.io/en/ZoneId.html */,
+			L"Ignore and Continue", L"You may face further warnings");
+
+	switch (iBtn)
+	{
+	case IDNO:
+		ConEmuAbout::OnInfo_OnlineWiki(L"ZoneId");
+		// Exit
+		return -1;
+	case IDYES:
+		break; // Try to unblock
+	default:
+		// Ignore and continue;
+		return 0;
+	}
+
+	DWORD nErrCode;
+	LPCWSTR pszFrom = szZonedFiles.ms_Arg;
+	CEStr lsFile;
+	bool bFirstRunAs = true;
+	while (0 == NextLine(&pszFrom, lsFile))
+	{
+		if (!DropZoneIdentifier(lsFile, nErrCode))
+		{
+			if ((nErrCode == ERROR_ACCESS_DENIED)
+				&& bFirstRunAs
+				&& IsWin6() // UAC available?
+				&& !IsUserAdmin()
+				)
+			{
+				bFirstRunAs = false;
+
+				// Let's try to rerun as Administrator
+				SHELLEXECUTEINFO sei = {sizeof(sei)};
+				sei.fMask = SEE_MASK_NOASYNC | SEE_MASK_NOCLOSEPROCESS;
+				sei.lpVerb = L"runas";
+				sei.lpFile = gpConEmu->ms_ConEmuExe;
+				sei.lpParameters = L" -ZoneId -Exit";
+				sei.lpDirectory = gpConEmu->ms_ConEmuExeDir;
+				sei.nShow = SW_SHOWNORMAL;
+
+				if (ShellExecuteEx(&sei))
+				{
+					if (!sei.hProcess)
+					{
+						Sleep(500);
+						_ASSERTE(sei.hProcess!=NULL);
+					}
+					if (sei.hProcess)
+					{
+						WaitForSingleObject(sei.hProcess, INFINITE);
+					}
+
+					int nZone = 0;
+					if (!HasZoneIdentifier(lsFile, nZone)
+						|| (nZone != 0 /*LocalComputer*/))
+					{
+						// Assuming that elevated copy has fixed all zone problems
+						break;
+					}
+				}
+			}
+
+			lsMsg = lstrmerge(L"Failed to drop ZoneId in file:\r\n", lsFile, L"\r\n\r\n" L"Ignore error and continue?" L"\r\n");
+			if (DisplayLastError(lsMsg, nErrCode, MB_ICONSTOP|MB_YESNO) != IDYES)
+			{
+				return -1; // Fails to change
+			}
+		}
+	}
+
+	return 0;
+}
+
 // 0 - Succeeded, otherwise - exit code
 // isScript - several tabs or splits were requested via "-cmdlist ..."
 // isBare - true if there was no switches, for example "ConEmu.exe c:\tools\far.exe". That is not correct command line actually
@@ -3350,6 +3485,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	DEBUGSTRSTARTUP(L"WinMain entered");
 	int iMainRc = 0;
 
+	g_hInstance = hInstance;
+	ghWorkingModule = (u64)hInstance;
+
 #ifdef _DEBUG
 	gbAllowChkHeap = true;
 #endif
@@ -3447,8 +3585,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	nCmp = lstrcmp(L" ", L"-");
 	nCmp = lstrcmpi(L" ", L"-");
 	nCmp = StrCmpI(L" ", L"\\");*/
-	g_hInstance = hInstance;
-	ghWorkingModule = (u64)hInstance;
 	gpLocalSecurity = LocalSecurity();
 
 	#ifdef _DEBUG
@@ -3485,9 +3621,31 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 //		'я', (wchar_t)0x44F, 0x44F, L"End");
 //#endif
 
+	// lpCmdLine is not a UNICODE string, that's why we have to use GetCommandLineW()
+	// However, cygwin breaks normal way of creating Windows' processes,
+	// and GetCommandLineW will be useless in cygwin's builds (returns only exe full path)
+	CEStr lsCvtCmdLine;
+	if (lpCmdLine && *lpCmdLine)
+	{
+		int iLen = lstrlenA(lpCmdLine);
+		MultiByteToWideChar(CP_ACP, 0, lpCmdLine, -1, lsCvtCmdLine.GetBuffer(iLen), iLen+1);
+	}
+	// Prepared command line
+	CEStr lsCommandLine;
+	#if !defined(__CYGWIN__)
+	lsCommandLine.Set(GetCommandLineW());
+	#else
+	lsCommandLine.Set(lsCvtCmdLine.ms_Arg);
+	#endif
+	if (lsCommandLine.IsEmpty())
+	{
+		lsCommandLine.Set(L"");
+	}
+
 #if defined(SHOW_STARTED_MSGBOX)
 	wchar_t szTitle[128]; _wsprintf(szTitle, SKIPLEN(countof(szTitle)) L"Conemu started, PID=%i", GetCurrentProcessId());
-	MessageBox(NULL, GetCommandLineW(), szTitle, MB_OK|MB_ICONINFORMATION|MB_SETFOREGROUND|MB_SYSTEMMODAL);
+	CEStr lsText = lstrmerge(L"GetCommandLineW()\n", GetCommandLineW(), L"\n\n\n" L"lpCmdLine\n", lsCvtCmdLine.ms_Arg);
+	MessageBox(NULL, lsText, szTitle, MB_OK|MB_ICONINFORMATION|MB_SETFOREGROUND|MB_SYSTEMMODAL);
 #elif defined(WAIT_STARTED_DEBUGGER)
 	while (!IsDebuggerPresent())
 		Sleep(250);
@@ -3495,13 +3653,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 #else
 
 #ifdef _DEBUG
-	if (_tcsstr(GetCommandLine(), L"/debugi"))
+	if (_tcsstr(lsCommandLine, L"/debugi"))
 	{
 		if (!IsDebuggerPresent()) _ASSERT(FALSE);
 	}
 	else
 #endif
-		if (_tcsstr(GetCommandLine(), L"/debug"))
+		if (_tcsstr(lsCommandLine, L"/debug"))
 		{
 			if (!IsDebuggerPresent()) MBoxA(L"Conemu started");
 		}
@@ -3536,10 +3694,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//gpSet->InitSettings();
 
 	int iParseRc = 0;
-	if (!gpConEmu->ParseCommandLine(GetCommandLine(), iParseRc))
+	if (!gpConEmu->ParseCommandLine(lsCommandLine, iParseRc))
 	{
 		return iParseRc;
 	}
+
+	/* ******************************** */
+	int iZoneCheck = CheckZoneIdentifiers(gpConEmu->opt.FixZoneId.GetBool());
+	if (iZoneCheck < 0)
+	{
+		return CERR_ZONE_CHECK_ERROR;
+	}
+	if (gpConEmu->opt.FixZoneId.GetBool() && gpConEmu->opt.ExitAfterActionPrm.GetBool())
+	{
+		_ASSERTE(gpConEmu->opt.cmdNew.IsEmpty());
+		return 0;
+	}
+	/* ******************************** */
 
 //------------------------------------------------------------------------
 ///| load settings and apply parameters |/////////////////////////////////
@@ -3598,6 +3769,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	if (gpConEmu->opt.QuakeMode.Exists)
 	{
 		gpConEmu->SetQuakeMode(gpConEmu->opt.QuakeMode.GetInt());
+		gpSet->isRestore2ActiveMon = true;
 	}
 
 	// Update package was dropped on ConEmu icon?

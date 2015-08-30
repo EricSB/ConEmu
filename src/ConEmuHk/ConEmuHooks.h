@@ -76,9 +76,6 @@ typedef BOOL (WINAPI* AttachConsole_t)(DWORD dwProcessId);
 AttachConsole_t GetAttachConsoleProc();
 void CheckAnsiConVar(LPCWSTR asName);
 
-typedef HWND (WINAPI* GetConsoleWindow_T)();
-extern GetConsoleWindow_T gfGetRealConsoleWindow;
-
 enum ConEmuHkDllState
 {
 	ds_Undefined = 0,
@@ -198,6 +195,8 @@ extern "C" {
 	FARPROC WINAPI GetWriteConsoleW();
 	int WINAPI RequestLocalServer(/*[IN/OUT]*/RequestLocalServerParm* Parm);
 	FARPROC WINAPI GetLoadLibraryW();
+	FARPROC WINAPI GetVirtualAlloc();
+	FARPROC WINAPI GetTrampoline(LPCSTR pszName);
 #if defined(__GNUC__)
 };
 #endif

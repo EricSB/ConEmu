@@ -14,11 +14,11 @@
 #undef APSTUDIO_READONLY_SYMBOLS
 
 /////////////////////////////////////////////////////////////////////////////
-// Russian (Russia) resources
+// English (United States) resources
 
-#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_RUS)
-LANGUAGE LANG_RUSSIAN, SUBLANG_DEFAULT
-#pragma code_page(1251)
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
 
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////
@@ -40,7 +40,14 @@ END
 
 3 TEXTINCLUDE 
 BEGIN
+    "#if defined(__GNUC__)\r\n"
+    "#define CERC_MANIFEST\r\n"
+    "#else\r\n"
+    "#define CERC_IMAGES\r\n"
+    "#endif\r\n"
+    "\r\n"
     "#include ""ConEmu.rc2""\r\n"
+    "#include ""Externals.rc2""\r\n"
     "#include ""Version.rc2""\r\n"
     "\r\n"
     "\0"
@@ -48,16 +55,6 @@ END
 
 #endif    // APSTUDIO_INVOKED
 
-#endif    // Russian (Russia) resources
-/////////////////////////////////////////////////////////////////////////////
-
-
-/////////////////////////////////////////////////////////////////////////////
-// English (United States) resources
-
-#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
-LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
-#pragma code_page(1252)
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -163,7 +160,7 @@ STYLE DS_SETFONT | DS_FIXEDSYS | DS_CONTROL | WS_CHILD
 EXSTYLE WS_EX_CONTROLPARENT
 FONT 8, "MS Shell Dlg", 0, 0, 0x1
 BEGIN
-    GROUPBOX        "Console size and Window position",IDC_STATIC,4,1,319,165
+    GROUPBOX        "Console size and Window position",IDC_STATIC,4,1,319,180
     EDITTEXT        tWndWidth,42,63,39,12,ES_AUTOHSCROLL
     EDITTEXT        tWndHeight,122,63,39,12,ES_AUTOHSCROLL
     CONTROL         "Normal",rNormal,"Button",BS_AUTORADIOBUTTON | WS_GROUP,17,50,38,8
@@ -194,7 +191,7 @@ BEGIN
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,17,131,149,8
     RTEXT           "Pad size:",IDC_STATIC,156,131,45,8
     EDITTEXT        tPadSize,206,130,43,12,ES_AUTOHSCROLL
-    GROUPBOX        "Alignment",IDC_STATIC,9,119,306,42
+    GROUPBOX        "Alignment",IDC_STATIC,9,119,306,55
     LTEXT           "pixels",IDC_STATIC,253,131,45,8
     CONTROL         "Snap to desktop edges",cbSnapToDesktopEdges,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,193,145,110,8
     GROUPBOX        "FullScreen mode",IDC_STATIC,9,195,306,29,NOT WS_VISIBLE | WS_DISABLED
@@ -205,6 +202,8 @@ BEGIN
     CTEXT           "x",IDC_STATIC,255,207,8,8,NOT WS_VISIBLE | WS_DISABLED
     CONTROL         "Align ConEmu window size to cells",cbIntegralSize,
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,17,145,144,8
+    CONTROL         "Restore to active monitor",cbRestore2ActiveMonitor,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,17,159,144,8
 END
 
 IDD_SPG_SHOW DIALOGEX 0, 0, 328, 235
@@ -412,24 +411,27 @@ STYLE DS_SETFONT | DS_FIXEDSYS | DS_CONTROL | WS_CHILD
 EXSTYLE WS_EX_CONTROLPARENT
 FONT 8, "MS Shell Dlg", 0, 0, 0x1
 BEGIN
-    GROUPBOX        "WARNING!!! Enabling this option may cause false alarms in antiviral programs!!!",IDC_STATIC,4,1,319,183
+    GROUPBOX        "WARNING!!! Enabling this option may cause false alarms in antiviral programs!!!",IDC_STATIC,4,1,319,228
     CONTROL         "Force ConEmu as default terminal for console applications",cbDefaultTerminal,
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,9,14,309,8
     LTEXT           "List of hooked executables or window class names delimited with ‘|’\r\nExample: explorer.exe|devenv.exe|wdexpress.exe|totalcmd.exe|TaskManagerWindow",stDefaultTerminal,10,44,306,17
-    EDITTEXT        tDefaultTerminal,9,64,308,13,ES_AUTOHSCROLL
+    EDITTEXT        tDefaultTerminal,9,64,264,13,ES_AUTOHSCROLL
     CONTROL         "Don't use ConEmuHk.dll in started console",cbDefaultTerminalNoInjects,
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,9,86,308,8
-    CONTROL         "Automatic",rbDefaultTerminalConfAuto,"Button",BS_AUTORADIOBUTTON,17,130,57,8
-    CONTROL         "Always",rbDefaultTerminalConfAlways,"Button",BS_AUTORADIOBUTTON,80,130,57,8
-    CONTROL         "Never",rbDefaultTerminalConfNever,"Button",BS_AUTORADIOBUTTON,141,130,62,8
+    CONTROL         "Automatic",rbDefaultTerminalConfAuto,"Button",BS_AUTORADIOBUTTON,17,145,57,8
+    CONTROL         "Always",rbDefaultTerminalConfAlways,"Button",BS_AUTORADIOBUTTON,80,145,57,8
+    CONTROL         "Never",rbDefaultTerminalConfNever,"Button",BS_AUTORADIOBUTTON,141,145,62,8
     CONTROL         "Register on OS startup",cbDefaultTerminalStartup,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,9,28,96,8
     CONTROL         "Leave in TSA",cbDefaultTerminalTSA,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,111,28,70,8
     CONTROL         "Aggressive mode",cbDefTermAgressive,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,188,28,96,8
-    GROUPBOX        "Confirm close (Press Enter or Esc to close console)",gbDefaultTermConfClose,9,116,308,31
+    GROUPBOX        "Confirm close (Press Enter or Esc to close console)",gbDefaultTermConfClose,9,131,308,31
     CONTROL         "Use existing ConEmu window if available",cbDefaultTerminalUseExisting,
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,9,101,305,8
-    LTEXT           "If you want to start some command in the Windows standard console window from hooked executable when 'Default terminal' is enabled, just use ""-new_console:z"" switch.\r\nExample: ""cmd.exe -new_console:z""",stDefaultTerminalSwitchInfo,10,153,306,26
-    LTEXT           "http://conemu.github.io/en/DefaultTerminal.html",tDefTermWikiLink,10,222,306,8
+    LTEXT           "If you want to start some command in the Windows standard console window from hooked executable when 'Default terminal' is enabled, just use ""-new_console:z"" switch.\r\nExample: ""cmd.exe -new_console:z""",stDefaultTerminalSwitchInfo,10,168,306,26
+    LTEXT           "http://conemu.github.io/en/DefaultTerminal.html",tDefTermWikiLink,10,217,306,8
+    PUSHBUTTON      "Apply",cbApplyDefTerm,278,64,39,12
+    CONTROL         "Enable logging of hooked processes (debug purposes)",cbDefaultTerminalDebugLog,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,9,115,305,8
 END
 
 IDD_SPG_STARTUP DIALOGEX 0, 0, 328, 235
@@ -1621,6 +1623,10 @@ BEGIN
     BEGIN
     END
 
+    IDD_SPG_WNDSIZEPOS, DIALOG
+    BEGIN
+    END
+
     IDD_SPG_SHOW, DIALOG
     BEGIN
     END
@@ -1798,43 +1804,6 @@ BEGIN
 END
 #endif    // APSTUDIO_INVOKED
 
-
-/////////////////////////////////////////////////////////////////////////////
-//
-// Cursor
-//
-
-IDC_SPLITV              CURSOR                  "vsplit.cur"
-IDC_SPLITH              CURSOR                  "hsplit.cur"
-IDC_COPY                CURSOR                  "CursorDragCopy.cur"
-IDC_LINK                CURSOR                  "CursorDragLink.cur"
-IDC_MOVE                CURSOR                  "CursorDragMove.cur"
-
-/////////////////////////////////////////////////////////////////////////////
-//
-// Bitmap
-//
-
-IDB_MAIN_TOOLBAR        BITMAP                  "toolbar1.bmp"
-IDB_SHIELD              BITMAP                  "Shield.bmp"
-IDB_SHIELD16            BITMAP                  "Shield16.bmp"
-IDB_SCROLL              BITMAP                  "Scroll.bmp"
-IDB_RIGHTCLICKING       BITMAP                  "graphics/circles.bmp"
-IDB_SEARCH              BITMAP                  "graphics/search.bmp"
-IDB_DONATE              BITMAP                  "graphics/donate.bmp"
-IDB_FLATTR              BITMAP                  "graphics/flattr.bmp"
-
-/////////////////////////////////////////////////////////////////////////////
-//
-// Icon
-//
-
-// Icon with lowest ID value placed first to ensure application icon
-// remains consistent on all systems.
-IDI_ICON1               ICON                    "ConEmu.ico"
-IDI_ICON2               ICON                    "Far.ico"
-IDI_ICON3               ICON                    "Far2.ico"
-IDI_SHIELD              ICON                    "shield.ico"
 #endif    // English (United States) resources
 /////////////////////////////////////////////////////////////////////////////
 
@@ -1845,7 +1814,14 @@ IDI_SHIELD              ICON                    "shield.ico"
 //
 // Generated from the TEXTINCLUDE 3 resource.
 //
+#if defined(__GNUC__)
+#define CERC_MANIFEST
+#else
+#define CERC_IMAGES
+#endif
+
 #include "ConEmu.rc2"
+#include "Externals.rc2"
 #include "Version.rc2"
 
 

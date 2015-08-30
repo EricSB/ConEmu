@@ -1,6 +1,6 @@
 ﻿
 /*
-Copyright (c) 2014 Maximus5
+Copyright (c) 2014-2015 Maximus5
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -36,6 +36,7 @@ const CETASKFLAGS
 	CETF_CMD_DEFAULT    = 0x0002,
 	CETF_NO_TASKBAR     = 0x0004,
 	CETF_ADD_TOOLBAR    = 0x0008,
+	CETF_DONT_CHANGE    = 0xF0000000,
 	CETF_NONE           = 0;
 
 struct CommandTasks

@@ -355,6 +355,8 @@ class CConEmuMain
 			LONG g_evtidx;
 			void Log(WPARAM State, LPARAM SessionID);
 
+			BOOL bWasLocked; // To be sure that mn_IgnoreSizeChange will be processed properly
+
 			bool Connected();
 
 			void SessionChanged(WPARAM State, LPARAM SessionID);
@@ -542,7 +544,6 @@ class CConEmuMain
 		UINT mn_MsgCreateViewWindow;
 		UINT mn_MsgPostTaskbarActivate; BOOL mb_PostTaskbarActivate;
 		UINT mn_MsgInitVConGhost;
-		UINT mn_MsgCreateCon;
 		UINT mn_MsgTaskBarCreated;
 		UINT mn_MsgPanelViewMapCoord;
 		UINT mn_MsgTaskBarBtnCreated;

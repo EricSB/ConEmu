@@ -99,9 +99,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ShellProcessor.h"
 #include "GuiAttach.h"
 #include "Ansi.h"
+#include "MainThread.h"
 #include "../common/CmdLine.h"
 #include "../common/ConsoleAnnotation.h"
 #include "../common/ConsoleRead.h"
+#include "../common/HkFunc.h"
 #include "../common/UnicodeChars.h"
 #include "../common/WConsole.h"
 #include "../common/WThreads.h"
@@ -142,10 +144,6 @@ void PatchDialogParentWnd(HWND& hWndParent);
 #undef isPressed
 #define isPressed(inp) ((GetKeyState(inp) & 0x8000) == 0x8000)
 
-//110131 попробуем просто добвавить ее в ExcludedModules
-//#include <WinInet.h>
-//#pragma comment(lib, "wininet.lib")
-
 
 #ifdef _DEBUG
 extern bool gbShowExeMsgBox;
@@ -180,8 +178,6 @@ extern DWORD gnLastShowExeTick;
 //#endif
 
 extern HMODULE ghOurModule; // Хэндл нашей dll'ки (здесь хуки не ставятся)
-extern DWORD   gnHookMainThreadId;
-extern BOOL    gbHooksTemporaryDisabled;
 extern MMap<DWORD,BOOL> gStartedThreads;
 //__declspec( thread )
 //static BOOL    gbInShellExecuteEx = FALSE;
@@ -197,8 +193,6 @@ extern HWND    ghConEmuWndDC; // ConEmu DC window
 extern DWORD   gnGuiPID;
 extern BOOL    gbWasSucceededInRead;
 HDC ghTempHDC = NULL;
-GetConsoleWindow_T gfGetRealConsoleWindow = NULL;
-//extern HWND WINAPI GetRealConsoleWindow(); // Entry.cpp
 extern HANDLE ghCurrentOutBuffer;
 HANDLE ghStdOutHandle = NULL;
 HANDLE ghLastConInHandle = NULL, ghLastNotConInHandle = NULL;
@@ -289,30 +283,9 @@ int WINAPI OnCompareStringW(LCID Locale, DWORD dwCmpFlags, LPCWSTR lpString1, in
 LONG WINAPI OnRegQueryValueExW(HKEY hKey, LPCWSTR lpValueName, LPDWORD lpReserved, LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData);
 
 
-//
-//static BOOL WINAPI OnHttpSendRequestA(LPVOID hRequest, LPCSTR lpszHeaders, DWORD dwHeadersLength, LPVOID lpOptional, DWORD dwOptionalLength);
-//static BOOL WINAPI OnHttpSendRequestW(LPVOID hRequest, LPCWSTR lpszHeaders, DWORD dwHeadersLength, LPVOID lpOptional, DWORD dwOptionalLength);
-
-//static HookItem HooksFarOnly[] =
-//{
-////	{OnlstrcmpiA,      "lstrcmpiA",      kernel32, 0},
-//	{(void*)OnCompareStringW, "CompareStringW", kernel32},
-//
-//	/* ************************ */
-//	//110131 попробуем просто добавить ее в ExcludedModules
-//	//{(void*)OnHttpSendRequestA, "HttpSendRequestA", wininet, 0},
-//	//{(void*)OnHttpSendRequestW, "HttpSendRequestW", wininet, 0},
-//	/* ************************ */
-//
-//	{0, 0, 0}
-//};
-
 // Service functions
 //typedef DWORD (WINAPI* GetProcessId_t)(HANDLE Process);
 GetProcessId_t gfGetProcessId = NULL;
-
-//BOOL gbShowOnSetForeground = FALSE;
-
 
 
 // Forward declarations of the hooks
@@ -379,7 +352,6 @@ HANDLE WINAPI OnOpenFileMappingW(DWORD dwDesiredAccess, BOOL bInheritHandle, LPC
 LPVOID WINAPI OnMapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, DWORD dwFileOffsetHigh, DWORD dwFileOffsetLow, SIZE_T dwNumberOfBytesToMap);
 BOOL WINAPI OnUnmapViewOfFile(LPCVOID lpBaseAddress);
 BOOL WINAPI OnCloseHandle(HANDLE hObject);
-BOOL WINAPI OnGetModuleHandleExW(DWORD dwFlags, LPCWSTR lpModuleName, HMODULE *phModule);
 
 #ifdef _DEBUG
 HANDLE WINAPI OnCreateNamedPipeW(LPCWSTR lpName, DWORD dwOpenMode, DWORD dwPipeMode, DWORD nMaxInstances,DWORD nOutBufferSize, DWORD nInBufferSize, DWORD nDefaultTimeOut,LPSECURITY_ATTRIBUTES lpSecurityAttributes);
@@ -516,8 +488,6 @@ bool InitHooksCommon()
 		{(void*)OnReadConsoleInputA,	"ReadConsoleInputA",	kernel32},
 		{(void*)OnWriteConsoleInputA,	"WriteConsoleInputA",	kernel32},
 		{(void*)OnWriteConsoleInputW,	"WriteConsoleInputW",	kernel32},
-		// Issue 1899: Support GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS flag because of CreateFileW
-		{(void*)OnGetModuleHandleExW,	"GetModuleHandleExW",	kernel32},
 		/* ANSI Escape Sequences SUPPORT */
 		//#ifdef HOOK_ANSI_SEQUENCES
 		{(void*)CEAnsi::OnCreateFileW,	"CreateFileW",  		kernel32},
@@ -684,7 +654,7 @@ bool InitHooksCommon()
 	return true;
 }
 
-bool InitHooksDefaultTrm()
+bool InitHooksDefTerm()
 {
 	// Хуки требующиеся для установки ConEmu как терминала по умолчанию
 	HookItem HooksCommon[] =
@@ -712,6 +682,8 @@ bool InitHooksDefaultTrm()
 		/* ************************ */
 		{0}
 	};
+	// Required in VisualStudio and CodeBlocks (gdb) debuggers
+	// Don't restrict to them, other Dev Envs may behave in similar way
 	HookItem HooksDevStudio[] =
 	{
 		{(void*)OnResumeThread,			"ResumeThread",			kernel32},
@@ -737,7 +709,8 @@ bool InitHooksDefaultTrm()
 		InitHooks(HooksVshost);
 	}
 
-	if (gbIsVStudio)
+	// Required in VisualStudio and CodeBlocks (gdb) debuggers
+	// Don't restrict to them, other Dev Envs may behave in similar way
 	{
 		InitHooks(HooksDevStudio);
 	}
@@ -843,19 +816,12 @@ bool InitHooksFar()
 	}
 
 	if (!lbIsFar)
-		return true; // не хукать
+		return true; // Don't hook
 
 	HookItem HooksFarOnly[] =
 	{
-	//	{OnlstrcmpiA,      "lstrcmpiA",      kernel32, 0},
 		{(void*)OnCompareStringW, "CompareStringW", kernel32},
-
 		/* ************************ */
-		//110131 попробуем просто добавить ее в ExcludedModules
-		//{(void*)OnHttpSendRequestA, "HttpSendRequestA", wininet, 0},
-		//{(void*)OnHttpSendRequestW, "HttpSendRequestW", wininet, 0},
-		/* ************************ */
-
 		{0, 0, 0}
 	};
 	InitHooks(HooksFarOnly);
@@ -890,68 +856,6 @@ bool InitHooksClink()
 	return true;
 }
 
-
-
-//static HookItem HooksCommon[] =
-//{
-//	/* ***** MOST CALLED ***** */
-////	{(void*)OnGetConsoleWindow,     "GetConsoleWindow",     kernel32}, -- пока смысла нет. инжекты еще не на старте ставятся
-//	//{(void*)OnWriteConsoleOutputWx,	"WriteConsoleOutputW",  kernel32},
-//	//{(void*)OnWriteConsoleOutputAx,	"WriteConsoleOutputA",  kernel32},
-//	{(void*)OnWriteConsoleOutputW,	"WriteConsoleOutputW",  kernel32},
-//	{(void*)OnWriteConsoleOutputA,	"WriteConsoleOutputA",  kernel32},
-//	/* ************************ */
-//	//{(void*)OnPeekConsoleInputWx,	"PeekConsoleInputW",	kernel32},
-//	//{(void*)OnPeekConsoleInputAx,	"PeekConsoleInputA",	kernel32},
-//	//{(void*)OnReadConsoleInputWx,	"ReadConsoleInputW",	kernel32},
-//	//{(void*)OnReadConsoleInputAx,	"ReadConsoleInputA",	kernel32},
-//	{(void*)OnPeekConsoleInputW,	"PeekConsoleInputW",	kernel32},
-//	{(void*)OnPeekConsoleInputA,	"PeekConsoleInputA",	kernel32},
-//	{(void*)OnReadConsoleInputW,	"ReadConsoleInputW",	kernel32},
-//	{(void*)OnReadConsoleInputA,	"ReadConsoleInputA",	kernel32},
-//	/* ************************ */
-//	{(void*)OnCreateProcessA,		"CreateProcessA",		kernel32},
-//	{(void*)OnCreateProcessW,		"CreateProcessW",		kernel32},
-//	/* ************************ */
-//	{(void*)OnGetConsoleAliasesW,	"GetConsoleAliasesW",	kernel32},
-//	{(void*)OnAllocConsole,			"AllocConsole",			kernel32},
-//	{(void*)OnFreeConsole,			"FreeConsole",			kernel32},
-//	{
-//		(void*)OnGetNumberOfConsoleInputEvents,
-//		"GetNumberOfConsoleInputEvents",
-//		kernel32
-//	},
-//	{
-//		(void*)OnCreateConsoleScreenBuffer,
-//		"CreateConsoleScreenBuffer",
-//		kernel32
-//	},
-//#ifdef _DEBUG
-//	{(void*)OnCreateNamedPipeW,		"CreateNamedPipeW",		kernel32},
-//#endif
-//#ifdef _DEBUG
-//	{(void*)OnVirtualAlloc,			"VirtualAlloc",			kernel32},
-//#endif
-//	// Microsoft bug?
-//	// http://code.google.com/p/conemu-maximus5/issues/detail?id=60
-//	{(void*)OnSetConsoleCP,			"SetConsoleCP",			kernel32},
-//	{(void*)OnSetConsoleOutputCP,	"SetConsoleOutputCP",	kernel32},
-//	/* ************************ */
-//	{(void*)OnTrackPopupMenu,		"TrackPopupMenu",		user32},
-//	{(void*)OnTrackPopupMenuEx,		"TrackPopupMenuEx",		user32},
-//	{(void*)OnFlashWindow,			"FlashWindow",			user32},
-//	{(void*)OnFlashWindowEx,		"FlashWindowEx",		user32},
-//	{(void*)OnSetForegroundWindow,	"SetForegroundWindow",	user32},
-//	{(void*)OnGetWindowRect,		"GetWindowRect",		user32},
-//	{(void*)OnScreenToClient,		"ScreenToClient",		user32},
-//	/* ************************ */
-//	{(void*)OnShellExecuteExA,		"ShellExecuteExA",		shell32},
-//	{(void*)OnShellExecuteExW,		"ShellExecuteExW",		shell32},
-//	{(void*)OnShellExecuteA,		"ShellExecuteA",		shell32},
-//	{(void*)OnShellExecuteW,		"ShellExecuteW",		shell32},
-//	/* ************************ */
-//	{0}
-//};
 
 void __stdcall SetFarHookMode(struct HookModeFar *apFarMode)
 {
@@ -1015,7 +919,7 @@ void __stdcall SetFarHookMode(struct HookModeFar *apFarMode)
 //}
 
 // Эту функцию нужно позвать из DllMain
-BOOL StartupHooks(HMODULE ahOurDll)
+BOOL StartupHooks()
 {
 	//HLOG0("StartupHooks",0);
 #ifdef _DEBUG
@@ -1035,6 +939,8 @@ BOOL StartupHooks(HMODULE ahOurDll)
 	//gbInShellExecuteEx = FALSE;
 
 	WARNING("Получить из мэппинга gdwServerPID");
+
+	//TODO: Change GetModuleHandle to GetModuleHandleEx? Does it exist in Win2k?
 
 	// Зовем LoadLibrary. Kernel-то должен был сразу загрузиться (static link) в любой
 	// windows приложении, но вот shell32 - не обязательно, а нам нужно хуки проинициализировать
@@ -1058,7 +964,7 @@ BOOL StartupHooks(HMODULE ahOurDll)
 	if (gbPrepareDefaultTerminal)
 	{
 		HLOG1("StartupHooks.InitHooks",0);
-		InitHooksDefaultTrm();
+		InitHooksDefTerm();
 		HLOGEND1();
 	}
 	else
@@ -1103,8 +1009,14 @@ BOOL StartupHooks(HMODULE ahOurDll)
 
 	// Теперь можно обработать модули
 	HLOG1("SetAllHooks",0);
-	bool lbRc = SetAllHooks(ahOurDll, NULL, TRUE);
+	bool lbRc = SetAllHooks();
 	HLOGEND1();
+
+	extern FARPROC CallWriteConsoleW;
+	CallWriteConsoleW = (FARPROC)GetOriginalAddress((LPVOID)CEAnsi::OnWriteConsoleW, NULL);
+
+	extern GetConsoleWindow_T gfGetRealConsoleWindow; // from ConEmuCheck.cpp
+	gfGetRealConsoleWindow = (GetConsoleWindow_T)GetOriginalAddress((LPVOID)OnGetConsoleWindow, NULL);
 
 	print_timings(L"SetAllHooks - done");
 
@@ -1114,42 +1026,6 @@ BOOL StartupHooks(HMODULE ahOurDll)
 }
 
 
-
-
-//void ShutdownHooks()
-//{
-//	UnsetAllHooks();
-//
-//	//// Завершить работу с реестром
-//	//DoneHooksReg();
-//
-//	// Уменьшение счетчиков загрузок
-//	if (ghKernel32)
-//	{
-//		FreeLibrary(ghKernel32);
-//		ghKernel32 = NULL;
-//	}
-//	if (ghUser32)
-//	{
-//		FreeLibrary(ghUser32);
-//		ghUser32 = NULL;
-//	}
-//	if (ghShell32)
-//	{
-//		FreeLibrary(ghShell32);
-//		ghShell32 = NULL;
-//	}
-//	if (ghAdvapi32)
-//	{
-//		FreeLibrary(ghAdvapi32);
-//		ghAdvapi32 = NULL;
-//	}
-//	if (ghComdlg32)
-//	{
-//		FreeLibrary(ghComdlg32);
-//		ghComdlg32 = NULL;
-//	}
-//}
 
 
 
@@ -1461,7 +1337,9 @@ HANDLE WINAPI OnOpenFileMappingW(DWORD dwDesiredAccess, BOOL bInheritHandle, LPC
 	//BOOL bMainThread = FALSE; // поток не важен
 	HANDLE hRc = FALSE;
 
-	if (ghConEmuWndDC && lpName && *lpName)
+	extern BOOL gbTrueColorServerRequested;
+	if (ghConEmuWndDC && lpName && *lpName
+		&& !gbTrueColorServerRequested)
 	{
 		/**
 		* Share name to search for
@@ -1580,31 +1458,6 @@ BOOL WINAPI OnCloseHandle(HANDLE hObject)
 	if (ghSkipSetThreadContextForThread == hObject)
 		ghSkipSetThreadContextForThread = NULL;
 
-	return lbRc;
-}
-
-BOOL WINAPI OnGetModuleHandleExW(DWORD dwFlags, LPCWSTR lpModuleName, HMODULE *phModule)
-{
-	typedef BOOL (WINAPI* OnGetModuleHandleExW_t)(DWORD dwFlags, LPCWSTR lpModuleName, HMODULE *phModule);
-	ORIGINALFAST(GetModuleHandleExW);
-	BOOL lbRc = FALSE;
-	LPCWSTR lpModuleName2 = lpModuleName;
-
-	// Issue 1899: Java uses following code
-	//		GetModuleHandleExW((GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT),
-	//			(LPCWSTR)&CreateFileW, &h)
-	// which caused NULL result because CreateFileW was hooked
-	if ((dwFlags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS) != 0)
-	{
-		HookItem* ph = NULL;
-		void* ptrOldProc = GetOriginalAddress((FARPROC)lpModuleName, NULL, FALSE, &ph);
-		if (ptrOldProc)
-		{
-			lpModuleName2 = (LPCWSTR)ptrOldProc;
-		}
-	}
-
-	lbRc = F(GetModuleHandleExW)(dwFlags, lpModuleName2, phModule);
 	return lbRc;
 }
 
@@ -1750,7 +1603,7 @@ BOOL WINAPI OnShellExecuteExA(LPSHELLEXECUTEINFOA lpExecInfo)
 	//// Under ConEmu only!
 	//if (ghConEmuWndDC)
 	//{
-	//	if (!lpNew->hwnd || lpNew->hwnd == GetConsoleWindow())
+	//	if (!lpNew->hwnd || lpNew->hwnd == GetRealConsoleWindow())
 	//		lpNew->hwnd = ghConEmuWnd;
 
 	//	HANDLE hDummy = NULL;
@@ -1861,10 +1714,14 @@ BOOL WINAPI OnShellExecuteExW(LPSHELLEXECUTEINFOW lpExecInfo)
 	return lbRc;
 }
 
+// Called from OnShellExecCmdLine
 HRESULT OurShellExecCmdLine(HWND hwnd, LPCWSTR pwszCommand, LPCWSTR pwszStartDir, bool bRunAsAdmin, bool bForce)
 {
 	HRESULT hr = E_UNEXPECTED;
 	BOOL bShell = FALSE;
+
+	CEStr lsLog = lstrmerge(L"OnShellExecCmdLine", bRunAsAdmin ? L"(RunAs): " : L": ", pwszCommand);
+	DefTermLogString(lsLog);
 
 	// Bad thing, ShellExecuteEx needs File&Parm, but we get both in pwszCommand
 	CmdArg szExe;
@@ -1886,11 +1743,13 @@ HRESULT OurShellExecCmdLine(HWND hwnd, LPCWSTR pwszCommand, LPCWSTR pwszStartDir
 		if (!FindImageSubsystem(pszFile, nCheckSybsystem1, nCheckBits1))
 		{
 			hr = (HRESULT)-1;
+			DefTermLogString(L"OnShellExecCmdLine: FindImageSubsystem failed");
 			goto wrap;
 		}
 		if (nCheckSybsystem1 != IMAGE_SUBSYSTEM_WINDOWS_CUI)
 		{
 			hr = (HRESULT)-1;
+			DefTermLogString(L"OnShellExecCmdLine: !=IMAGE_SUBSYSTEM_WINDOWS_CUI");
 			goto wrap;
 		}
 	}
@@ -1969,7 +1828,7 @@ HINSTANCE WINAPI OnShellExecuteA(HWND hwnd, LPCSTR lpOperation, LPCSTR lpFile, L
 
 	if (ghConEmuWndDC)
 	{
-		if (!hwnd || hwnd == GetConsoleWindow())
+		if (!hwnd || hwnd == GetRealConsoleWindow())
 			hwnd = ghConEmuWnd;
 	}
 
@@ -2006,7 +1865,7 @@ HINSTANCE WINAPI OnShellExecuteW(HWND hwnd, LPCWSTR lpOperation, LPCWSTR lpFile,
 
 	if (ghConEmuWndDC)
 	{
-		if (!hwnd || hwnd == GetConsoleWindow())
+		if (!hwnd || hwnd == GetRealConsoleWindow())
 			hwnd = ghConEmuWnd;
 	}
 
@@ -3374,7 +3233,7 @@ DWORD WINAPI OnGetConsoleAliasesW(LPWSTR AliasBuffer, DWORD AliasBufferLength, L
 		if (nError == ERROR_NOT_ENOUGH_MEMORY) // && gdwServerPID)
 		{
 			DWORD nServerPID = gnServerPID;
-			HWND hConWnd = GetConsoleWindow();
+			HWND hConWnd = GetRealConsoleWindow();
 			_ASSERTE(hConWnd == ghConWnd);
 
 			//MFileMapping<CESERVER_CONSOLE_MAPPING_HDR> ConInfo;
@@ -5314,7 +5173,7 @@ bool AttachServerConsole()
 	return lbAttachRc;
 }
 
-// Used in VisualStudio only, required for DefTerm support while debugging
+// Required in VisualStudio and CodeBlocks (gdb) for DefTerm support while debugging
 DWORD WINAPI OnResumeThread(HANDLE hThread)
 {
 	typedef DWORD (WINAPI* OnResumeThread_t)(HANDLE);
@@ -5397,7 +5256,7 @@ BOOL WINAPI OnAllocConsole(void)
 				#ifdef _DEBUG
 				COORD crNewSize = {crLocked.X, max(crLocked.Y, csbi.dwSize.Y)};
 				#endif
-				SetConsoleScreenBufferSize(hStdOut, crLocked);
+				hkFunc.setConsoleScreenBufferSize(hStdOut, crLocked);
 			}
 		}
 	}
@@ -5481,12 +5340,13 @@ HWND WINAPI OnGetConsoleWindow(void)
 	ORIGINALFAST(GetConsoleWindow);
 
 	_ASSERTE(F(GetConsoleWindow) != GetRealConsoleWindow);
+	// && F(GetConsoleWindow) != GetConsoleWindow - for minhook generation
 
 	if (ghConEmuWndDC && IsWindow(ghConEmuWndDC) /*ghConsoleHwnd*/)
 	{
 		if (ghAttachGuiClient)
 		{
-			// В GUI режиме (notepad, putty) отдавать реальный результат GetConsoleWindow()
+			// В GUI режиме (notepad, putty) отдавать реальный результат GetRealConsoleWindow()
 			// в этом режиме не нужно отдавать ни ghConEmuWndDC, ни серверную консоль
 			HWND hReal = GetRealConsoleWindow();
 			return hReal;
@@ -5810,7 +5670,7 @@ BOOL WINAPI OnChooseColorA(LPCHOOSECOLORA lpcc)
 {
 	ORIGINALFASTEX(ChooseColorA,ChooseColorA_f);
 	BOOL lbRc;
-	if (lpcc->hwndOwner == NULL || lpcc->hwndOwner == GetConsoleWindow())
+	if (lpcc->hwndOwner == NULL || lpcc->hwndOwner == GetRealConsoleWindow())
 		lbRc = MyChooseColor((SimpleApiFunction_t)F(ChooseColorA), lpcc, FALSE);
 	else
 		lbRc = F(ChooseColorA)(lpcc);
@@ -5821,7 +5681,7 @@ BOOL WINAPI OnChooseColorW(LPCHOOSECOLORW lpcc)
 {
 	ORIGINALFASTEX(ChooseColorW,ChooseColorW_f);
 	BOOL lbRc;
- 	if (lpcc->hwndOwner == NULL || lpcc->hwndOwner == GetConsoleWindow())
+	if (lpcc->hwndOwner == NULL || lpcc->hwndOwner == GetRealConsoleWindow())
 		lbRc = MyChooseColor((SimpleApiFunction_t)F(ChooseColorW), lpcc, TRUE);
 	else
 		lbRc = F(ChooseColorW)(lpcc);
@@ -5849,7 +5709,7 @@ BOOL WINAPI OnSetConsoleKeyShortcuts(BOOL bSet, BYTE bReserveKeys, LPVOID p1, DW
 			pIn->Data[1] = bReserveKeys;
 
 			wchar_t szGuiPipeName[128];
-			msprintf(szGuiPipeName, countof(szGuiPipeName), CEGUIPIPENAME, L".", (DWORD)ghConWnd);
+			msprintf(szGuiPipeName, countof(szGuiPipeName), CEGUIPIPENAME, L".", LODWORD(ghConWnd));
 
 			CESERVER_REQ* pOut = ExecuteCmd(szGuiPipeName, pIn, 1000, NULL);
 
@@ -5971,7 +5831,7 @@ bool FindModuleByAddress(const BYTE* lpAddress, LPWSTR pszModule, int cchMax)
 #ifdef _DEBUG
 LPVOID WINAPI OnVirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect)
 {
-	typedef HANDLE(WINAPI* OnVirtualAlloc_t)(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
+	typedef LPVOID(WINAPI* OnVirtualAlloc_t)(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
 	ORIGINALFAST(VirtualAlloc);
 
 	LPVOID lpResult = F(VirtualAlloc)(lpAddress, dwSize, flAllocationType, flProtect);
@@ -6096,70 +5956,6 @@ HANDLE WINAPI OnCreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dw
 	return hThread;
 }
 
-//110131 попробуем просто добвавить ее в ExcludedModules
-//// WinInet.dll
-//typedef BOOL (WINAPI* OnHttpSendRequestA_t)(LPVOID hRequest, LPCSTR lpszHeaders, DWORD dwHeadersLength, LPVOID lpOptional, DWORD dwOptionalLength);
-//typedef BOOL (WINAPI* OnHttpSendRequestW_t)(LPVOID hRequest, LPCWSTR lpszHeaders, DWORD dwHeadersLength, LPVOID lpOptional, DWORD dwOptionalLength);
-//// смысла нет - __try не помогает
-////BOOL OnHttpSendRequestA_SEH(OnHttpSendRequestA_t f, LPVOID hRequest, LPCSTR lpszHeaders, DWORD dwHeadersLength, LPVOID lpOptional, DWORD dwOptionalLength, BOOL* pbRc)
-////{
-////	BOOL lbOk = FALSE;
-////	SAFETRY {
-////		*pbRc = f(hRequest, lpszHeaders, dwHeadersLength, lpOptional, dwOptionalLength);
-////		lbOk = TRUE;
-////	} SAFECATCH {
-////		lbOk = FALSE;
-////	}
-////	return lbOk;
-////}
-////BOOL OnHttpSendRequestW_SEH(OnHttpSendRequestW_t f, LPVOID hRequest, LPCWSTR lpszHeaders, DWORD dwHeadersLength, LPVOID lpOptional, DWORD dwOptionalLength, BOOL* pbRc)
-////{
-////	BOOL lbOk = FALSE;
-////	SAFETRY {
-////		*pbRc = f(hRequest, lpszHeaders, dwHeadersLength, lpOptional, dwOptionalLength);
-////		lbOk = TRUE;
-////	} SAFECATCH {
-////		lbOk = FALSE;
-////	}
-////	return lbOk;
-////}
-//BOOL WINAPI OnHttpSendRequestA(LPVOID hRequest, LPCSTR lpszHeaders, DWORD dwHeadersLength, LPVOID lpOptional, DWORD dwOptionalLength)
-//{
-//	//MessageBoxW(NULL, L"HttpSendRequestA (1)", L"ConEmu plugin", MB_SETFOREGROUND|MB_SYSTEMMODAL|MB_ICONEXCLAMATION);
-//	ORIGINALFAST(HttpSendRequestA);
-//
-//	BOOL lbRc;
-//
-//	gbHooksTemporaryDisabled = TRUE;
-//	//MessageBoxW(NULL, L"HttpSendRequestA (2)", L"ConEmu plugin", MB_SETFOREGROUND|MB_SYSTEMMODAL|MB_ICONEXCLAMATION);
-//	lbRc = F(HttpSendRequestA)(hRequest, lpszHeaders, dwHeadersLength, lpOptional, dwOptionalLength);
-//	//if (!OnHttpSendRequestA_SEH(F(HttpSendRequestA), hRequest, lpszHeaders, dwHeadersLength, lpOptional, dwOptionalLength)) {
-//	//	MessageBoxW(NULL, L"Exception in HttpSendRequestA", L"ConEmu plugin", MB_SETFOREGROUND|MB_SYSTEMMODAL|MB_ICONSTOP);
-//	//}
-//	gbHooksTemporaryDisabled = FALSE;
-//	//MessageBoxW(NULL, L"HttpSendRequestA (3)", L"ConEmu plugin", MB_SETFOREGROUND|MB_SYSTEMMODAL|MB_ICONEXCLAMATION);
-//
-//	return lbRc;
-//}
-//BOOL WINAPI OnHttpSendRequestW(LPVOID hRequest, LPCWSTR lpszHeaders, DWORD dwHeadersLength, LPVOID lpOptional, DWORD dwOptionalLength)
-//{
-//	//MessageBoxW(NULL, L"HttpSendRequestW (1)", L"ConEmu plugin", MB_SETFOREGROUND|MB_SYSTEMMODAL|MB_ICONEXCLAMATION);
-//	ORIGINALFAST(HttpSendRequestW);
-//
-//	BOOL lbRc;
-//
-//	gbHooksTemporaryDisabled = TRUE;
-//	//MessageBoxW(NULL, L"HttpSendRequestW (2)", L"ConEmu plugin", MB_SETFOREGROUND|MB_SYSTEMMODAL|MB_ICONEXCLAMATION);
-//	lbRc = F(HttpSendRequestW)(hRequest, lpszHeaders, dwHeadersLength, lpOptional, dwOptionalLength);
-//	//if (!OnHttpSendRequestW_SEH(F(HttpSendRequestW), hRequest, lpszHeaders, dwHeadersLength, lpOptional, dwOptionalLength, &lbRc)) {
-//	//	MessageBoxW(NULL, L"Exception in HttpSendRequestW", L"ConEmu plugin", MB_SETFOREGROUND|MB_SYSTEMMODAL|MB_ICONSTOP);
-//	//}
-//	gbHooksTemporaryDisabled = FALSE;
-//	//MessageBoxW(NULL, L"HttpSendRequestW (3)", L"ConEmu plugin", MB_SETFOREGROUND|MB_SYSTEMMODAL|MB_ICONEXCLAMATION);
-//
-//	return lbRc;
-//}
-
 BOOL GuiSetForeground(HWND hWnd)
 {
 	BOOL lbRc = FALSE;
@@ -6206,7 +6002,7 @@ void GuiFlashWindow(BOOL bSimple, HWND hWnd, BOOL bInvert, DWORD dwFlags, UINT u
 			pIn->Flash.dwFlags = dwFlags;
 			pIn->Flash.uCount = uCount;
 			pIn->Flash.dwTimeout = dwTimeout;
-			HWND hConWnd = GetConsoleWindow();
+			HWND hConWnd = GetRealConsoleWindow();
 			pOut = ExecuteGuiCmd(hConWnd, pIn, hConWnd);
 
 			if (pOut) ExecuteFreeResult(pOut);
